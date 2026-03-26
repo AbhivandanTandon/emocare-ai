@@ -1,0 +1,2248 @@
+"""
+Run once: python scripts/build_knowledge_base.py
+Builds the FAISS index and metadata JSON for the RAG pipeline.
+"""
+import json
+import sys
+from pathlib import Path
+
+import faiss
+import numpy as np
+from sentence_transformers import SentenceTransformer
+
+# ── Paste your full CBT_KNOWLEDGE_BASE list here ──────────────────────────
+# (copy from models_fusion.ipynb Cell 7 — the list starting with fw_001...)
+CBT_KNOWLEDGE_BASE = [
+
+    # ──────────────────────────────────────────────────────────────
+    # SECTION 1 ▸ CORE THERAPEUTIC FRAMEWORKS  (docs fw_001–fw_010)
+    # ──────────────────────────────────────────────────────────────
+    {
+        "id": "fw_001", "category": "framework",
+        "title": "CBT: The Cognitive Model, Formulation, and Evidence Base",
+        "content": (
+            "Cognitive Behavioral Therapy (CBT) is built on the cognitive model: situations "
+            "trigger automatic thoughts (NATs) that drive emotions, physical sensations, and "
+            "behaviors. The 5-part (Padesky) formulation maps these bidirectional links. "
+            "At a deeper structural level, core beliefs (schemas) — 'I am unlovable', "
+            "'The world is dangerous', 'I am worthless' — develop from early experiences "
+            "and feed conditional assumptions ('If I succeed, I am acceptable'). "
+            "Case formulation: cross-sectional (maintaining cycles) + longitudinal "
+            "(developmental history, predisposing vulnerabilities) together guide individualized "
+            "treatment. Generic technique delivery without formulation is ineffective. "
+            "Evidence base: CBT has Level A (highest) evidence for MDD, all anxiety disorders, "
+            "OCD, PTSD, eating disorders, psychosis (CBTp), insomnia (CBT-I), and chronic pain. "
+            "NNT for mild-moderate depression: 2–4. Effect sizes (Cohen's d) typically 0.8–1.2 "
+            "for anxiety disorders vs. waitlist. "
+            "Transdiagnostic CBT (Unified Protocol, Barlow): targets core emotional dysregulation "
+            "processes common to all emotional disorders — useful for comorbid presentations. "
+            "Homework completion is the single strongest predictor of CBT outcome."
+        ),
+    },
+    {
+        "id": "fw_002", "category": "framework",
+        "title": "CBT: Complete Taxonomy of Cognitive Distortions",
+        "content": (
+            "Beck's cognitive distortions — complete clinical taxonomy: "
+            "(1) All-or-nothing thinking: binary extremes, no grey area. "
+            "(2) Catastrophizing: magnifying negatives, predicting worst outcomes. "
+            "(3) Minimization: shrinking positives. "
+            "(4) Mind reading: assuming others' negative evaluations without evidence. "
+            "(5) Fortune telling: predicting negative outcomes as certainties. "
+            "(6) Emotional reasoning: 'I feel it therefore it must be true.' "
+            "(7) Personalization: self-blame for external events. "
+            "(8) Overgeneralization: broad conclusions from single events ('always', 'never'). "
+            "(9) Should/must statements: rigid demands causing shame and guilt. "
+            "(10) Labeling: global self-assessment ('I am a failure/loser'). "
+            "(11) Mental filter: dwelling exclusively on negatives. "
+            "(12) Disqualifying the positive: dismissing positive experiences as flukes. "
+            "(13) Jumping to conclusions: inferring without evidence. "
+            "(14) Magnification: exaggerating significance of mistakes or shortcomings. "
+            "(15) Selective abstraction: focusing on one detail out of context. "
+            "Identification process: collaborative, not confrontational. Therapist labels "
+            "distortions with patient, never diagnoses them pejoratively. "
+            "Distortion identification opens the door to Socratic questioning and "
+            "behavioral experiments — it is not itself the change mechanism."
+        ),
+    },
+    {
+        "id": "fw_003", "category": "framework",
+        "title": "CBT: Thought Records, Behavioral Experiments, and Socratic Questioning",
+        "content": (
+            "7-Column Thought Record: situation, automatic thought (0–100% belief), "
+            "emotion (0–100% intensity), evidence FOR, evidence AGAINST, balanced thought, "
+            "re-rated belief and emotion. Purpose: generates distance from thoughts, not "
+            "wholesale replacement with positivity. "
+            "Behavioral Experiments (BEs): more powerful than verbal restructuring. "
+            "Types: observational (gather data), discovery (test new belief), "
+            "survey (compare own experience to others'). "
+            "Survey example: 'Do people notice when I blush?' → ask 10 acquaintances. "
+            "Socratic questioning: 'What is the evidence for and against?', "
+            "'What would you say to a friend with this thought?', "
+            "'What is the most helpful interpretation?', "
+            "'What would change if you thought differently?' "
+            "Guided discovery (not persuasion): therapist leads patient to draw "
+            "their own conclusions — change is more durable when self-generated. "
+            "Homework: always collaboratively set, always reviewed next session. "
+            "Non-completion explored without shame — valuable clinical data about barriers. "
+            "Schema-level work: downward arrow technique → follow NAT to its core belief: "
+            "'If that thought were true, what would it mean about you?'"
+        ),
+    },
+    {
+        "id": "fw_004", "category": "framework",
+        "title": "DBT: Dialectical Behavior Therapy — Full Four-Module Protocol",
+        "content": (
+            "DBT (Linehan, 1993) — biosocial model: biological emotional sensitivity + "
+            "pervasive invalidating environment → chronic emotion dysregulation. "
+            "Core dialectic: acceptance (radical) AND change (behavioral). "
+            "Full standard DBT = individual therapy + weekly skills group + phone coaching "
+            "+ therapist consultation team. "
+            "Module 1 — Mindfulness (foundational): 'What' skills (Observe, Describe, "
+            "Participate) + 'How' skills (Non-judgmentally, One-mindfully, Effectively). "
+            "Module 2 — Distress Tolerance: crisis survival skills — TIPP (Temperature, "
+            "Intense exercise, Paced breathing, Progressive relaxation); ACCEPTS "
+            "(Activities, Contributing, Comparisons, Emotions, Pushing away, Thoughts, "
+            "Sensations); Self-Soothe (5 senses); IMPROVE the moment; Pros-Cons. "
+            "Radical Acceptance: fully acknowledging reality without approval or resignation. "
+            "Module 3 — Emotion Regulation: PLEASE (Physical health, Eating, Avoid substances, "
+            "Sleep, Exercise); Opposite Action; Build Positive Experiences; Check the Facts. "
+            "Module 4 — Interpersonal Effectiveness: DEAR MAN (Describe, Express, Assert, "
+            "Reinforce, Mindful, Appear confident, Negotiate); GIVE (relationship maintenance); "
+            "FAST (self-respect). Level A evidence for BPD, suicidality, eating disorders."
+        ),
+    },
+    {
+        "id": "fw_005", "category": "framework",
+        "title": "ACT: Acceptance and Commitment Therapy — Hexaflex Model",
+        "content": (
+            "ACT (Hayes, Strosahl, Wilson) targets psychological flexibility — the ability "
+            "to contact the present moment fully and act according to values. Hexaflex processes: "
+            "(1) Acceptance: willing contact with thoughts/feelings without struggle or suppression. "
+            "(2) Cognitive Defusion: 'I am having the thought that...' — reducing literal "
+            "believability; leaves on a stream; singing the thought; 'thank you, mind'. "
+            "(3) Present-Moment Awareness: flexible attention to now, not conceptualized "
+            "past/future — mindfulness with a functional purpose. "
+            "(4) Self-as-Context: the 'observing self' — the perspective that watches "
+            "thoughts without being defined by them (vs. self-as-content/fused identity). "
+            "(5) Values Clarification: chosen life directions (not goals) — what matters, "
+            "not what is correct or approved. Values are the compass, not the destination. "
+            "(6) Committed Action: values-consistent behavior despite psychological discomfort — "
+            "building psychological flexibility patterns over time. "
+            "Key ACT metaphors: 'Passengers on the bus', 'Tug of war with the monster', "
+            "'Chessboard', 'Hands as thoughts'. "
+            "ACT evidence base: chronic pain (strongest evidence), anxiety, depression, "
+            "OCD, substance use, psychosis, workplace stress. Works via values clarification "
+            "and defusion rather than challenging thought content."
+        ),
+    },
+    {
+        "id": "fw_006", "category": "framework",
+        "title": "MBCT: Mindfulness-Based Cognitive Therapy for Relapse Prevention",
+        "content": (
+            "MBCT (Segal, Williams, Teasdale 2002) integrates MBSR (Kabat-Zinn) with CBT. "
+            "Primary indication: relapse prevention in recurrent MDD (≥3 prior episodes). "
+            "NICE recommends MBCT for all patients with recurrent depression — reduces "
+            "relapse by 43–50% vs. treatment as usual; comparable to maintenance antidepressants. "
+            "Core mechanism: decentering/metacognitive awareness — observing thoughts as "
+            "mental events ('Thoughts are not facts') rather than direct reality reflections. "
+            "Targets depressive rumination: the cyclical, self-referential negative thinking "
+            "that maintains and deepens depressive episodes. "
+            "8-week group program: formal practices (body scan, mindful movement, sitting "
+            "meditation) + informal (mindful eating, walking, daily activities). "
+            "3-Minute Breathing Space (portable, crisis-applicable): "
+            "(A) Awareness — what am I experiencing right now? "
+            "(B) Gather — redirect to breath. "
+            "(C) Expand — widen to whole body and situation. "
+            "Action steps integrated: after breathing space, choose helpful response. "
+            "MBRP (Mindfulness-Based Relapse Prevention): MBCT adapted for substance use. "
+            "Contraindication: active/recent trauma requires Phase 1 stabilization before "
+            "trauma-relevant mindfulness — body scan can trigger dissociation."
+        ),
+    },
+    {
+        "id": "fw_007", "category": "framework",
+        "title": "Motivational Interviewing: Principles, Stages, and OARS",
+        "content": (
+            "MI (Miller & Rollnick, 3rd ed.) — collaborative, person-centred style for "
+            "eliciting behavior change by exploring and resolving ambivalence. "
+            "MI Spirit (PACE): Partnership (collaborative, not expert), Acceptance "
+            "(affirm worth, accurate empathy, autonomy support, affirmations), "
+            "Compassion (prioritize client's wellbeing), Evocation (draw out client's "
+            "own motivation — not installing). "
+            "Core skills (OARS): Open questions (explore), Affirmations (acknowledge "
+            "strengths), Reflections (simple/complex — deepens understanding), "
+            "Summaries (linking, transitional, collecting). "
+            "Stages of Change (Prochaska & DiClemente): Precontemplation (not considering "
+            "change), Contemplation (ambivalent), Preparation (planning), "
+            "Action (making changes), Maintenance (sustaining), Relapse (normal — not failure). "
+            "Match technique to stage: psychoeducation for Precontemplation, "
+            "decisional balance for Contemplation, goal-setting for Preparation. "
+            "Change talk (DARN-C): Desire, Ability, Reasons, Need, Commitment. "
+            "Sustain talk: roll with resistance using double-sided reflections. "
+            "Pushing action-stage techniques on precontemplation patients causes dropout. "
+            "MI is prerequisite skill for ALL therapeutic modalities — applies to medication "
+            "adherence, lifestyle change, therapy engagement, risk reduction."
+        ),
+    },
+    {
+        "id": "fw_008", "category": "framework",
+        "title": "Schema Therapy, CFT, and Narrative Therapy",
+        "content": (
+            "Schema Therapy (Young): targets 18 Early Maladaptive Schemas (EMS) across 5 domains: "
+            "Disconnection/Rejection (Abandonment, Mistrust/Abuse, Emotional Deprivation, "
+            "Defectiveness/Shame, Social Isolation); Impaired Autonomy (Dependence, "
+            "Vulnerability, Enmeshment, Failure); Impaired Limits (Entitlement, "
+            "Insufficient Self-Control); Other-Directedness (Subjugation, Self-Sacrifice, "
+            "Approval-Seeking); Overvigilance (Negativity, Emotional Inhibition, "
+            "Unrelenting Standards, Punitiveness). "
+            "Schema modes: Vulnerable Child, Angry/Impulsive Child, Detached Protector, "
+            "Punitive/Demanding Parent, Healthy Adult (therapeutic goal). "
+            "Techniques: limited reparenting, imagery rescripting of childhood memories, "
+            "chairwork (mode dialogues), behavioral pattern-breaking. "
+            "Compassion-Focused Therapy (Gilbert): targets shame and self-criticism via "
+            "developing the compassionate mind. Particularly for depression driven by "
+            "high self-criticism. Soothing rhythm breathing + compassionate self letter. "
+            "Narrative Therapy (White & Epston): externalizes the problem ('the depression "
+            "is not you'), finds unique outcomes (exceptions to the problem story), "
+            "builds alternative identity narratives. Culturally flexible, non-pathologizing. "
+            "Schema Therapy is first-line for BPD and personality disorders."
+        ),
+    },
+    {
+        "id": "fw_009", "category": "framework",
+        "title": "IPT, EMDR, and Trauma-Focused Therapies",
+        "content": (
+            "Interpersonal Therapy (IPT): 16-session structured therapy for depression. "
+            "Focus: one of four interpersonal problem areas — Grief (complicated bereavement), "
+            "Role dispute (interpersonal conflict), Role transition (life changes), "
+            "Interpersonal deficits (isolation, social skills). "
+            "IPT does not target cognitions — works through improving communication and "
+            "relationships. Level A evidence for depression; also for eating disorders (BN). "
+            "EMDR (Eye Movement Desensitization and Reprocessing, Shapiro): "
+            "WHO/APA/NICE first-line for PTSD. 8-phase protocol: history/treatment planning, "
+            "preparation, assessment, desensitization (bilateral stimulation during brief "
+            "trauma memory exposure), installation, body scan, closure, re-evaluation. "
+            "Only trained clinicians should deliver EMDR — AI must never simulate. "
+            "Trauma-Focused CBT (TF-CBT): gold standard for pediatric PTSD. "
+            "Components (PRACTICE): Psychoeducation, Relaxation, Affective modulation, "
+            "Cognitive coping, Trauma narrative, In vivo desensitization, Conjoint sessions, "
+            "Enhancing safety. "
+            "Prolonged Exposure (PE, Foa): imaginal + in vivo exposure to trauma cues, "
+            "processing of stuck points. CPT (Cognitive Processing Therapy): "
+            "challenges trauma-related beliefs (stuck points) via written accounts."
+        ),
+    },
+    {
+        "id": "fw_010", "category": "framework",
+        "title": "Problem-Solving Therapy, Behavioral Couples Therapy, and Family Therapy",
+        "content": (
+            "Problem-Solving Therapy (PST, D'Zurilla & Nezu): evidence-based for depression, "
+            "especially where practical life stressors predominate. "
+            "Steps: (1) Define the problem specifically. (2) Adopt problem-solving orientation "
+            "(controllable vs. uncontrollable; time-bound). (3) Generate alternatives "
+            "(brainstorm without evaluation). (4) Decision-making (pros/cons of top options). "
+            "(5) Solution implementation. (6) Evaluate and recycle if needed. "
+            "Particularly effective for elderly depression (PST-PC in primary care). "
+            "Behavioral Couples Therapy (BCT): NICE-recommended when relationship problems "
+            "are primary maintaining factor of depression or when one partner has alcohol use "
+            "disorder. BCT for alcohol: partner contracts, stimulus control, reinforcement. "
+            "Behavioral Family Therapy: evidence-based for schizophrenia relapse prevention "
+            "(reduces high Expressed Emotion households). "
+            "Systemic Family Therapy: focuses on family patterns, communication cycles, "
+            "intergenerational transmission. "
+            "Multi-Family Group (MFG): for schizophrenia and eating disorders — "
+            "psychoeducation + problem-solving across multiple families simultaneously. "
+            "Mentalization-Based Treatment (MBT, Bateman & Fonagy): for BPD — "
+            "develops ability to understand mental states in self and others."
+        ),
+    },
+
+    # ──────────────────────────────────────────────────────────────
+    # SECTION 2 ▸ CLINICAL ASSESSMENT TOOLS  (docs at_001–at_009)
+    # ──────────────────────────────────────────────────────────────
+    {
+        "id": "at_001", "category": "assessment",
+        "title": "PHQ-9 and PHQ-2: Depression Screening Protocols",
+        "content": (
+            "Patient Health Questionnaire-9: 9 items scored 0–3 (not at all → nearly every day). "
+            "Total 0–27. Thresholds: 0–4 Minimal, 5–9 Mild (watchful waiting), "
+            "10–14 Moderate (active treatment), 15–19 Moderately Severe (immediate treatment), "
+            "20–27 Severe (urgent psychiatric review). "
+            "Functional impairment item (last): required for clinical significance. "
+            "Item 9 (self-harm ideation): any score >0 triggers independent safety assessment "
+            "regardless of total — must not be aggregated away. "
+            "PHQ-2 (items 1–2: anhedonia + depressed mood): score ≥3 → proceed to full PHQ-9. "
+            "Sensitivity 88%, specificity 88% at cutoff ≥10. Validated in India urban/rural. "
+            "PHQ-A (Adolescent version): same items, adapted language. "
+            "Treatment response definition: ≥50% reduction from baseline score. "
+            "Remission: score ≤4. Reassess every 2–4 weeks during treatment. "
+            "AI trigger: P(Depression) > 0.55 → recommend PHQ-9; "
+            "P(Depression) > 0.65 → immediate safety assessment + clinician referral. "
+            "PHQ-9 must never be used as a diagnostic tool by itself — clinical interview required."
+        ),
+    },
+    {
+        "id": "at_002", "category": "assessment",
+        "title": "GAD-7 and GAD-2: Anxiety Screening Protocols",
+        "content": (
+            "Generalized Anxiety Disorder 7-item scale: items rated 0–3 over 2 weeks. "
+            "Thresholds: 0–4 Minimal, 5–9 Mild (monitor), 10–14 Moderate (active treatment), "
+            "15–21 Severe (immediate treatment + psychiatric consultation). "
+            "GAD-2 (items 1–2): score ≥3 → full GAD-7 required. "
+            "Sensitivity 89%, specificity 82% for GAD at cutoff ≥10. "
+            "Also screens for other anxiety disorders at lower sensitivity: "
+            "Panic Disorder (74%), Social Anxiety (72%), PTSD (68%). "
+            "Functional impairment item (last): required to establish clinical significance. "
+            "Reassess every 2–4 weeks during treatment. "
+            "Treatment response: ≥50% reduction. Remission: score ≤4. "
+            "PHQ-9 and GAD-7 are administered as a standard dyad in most settings. "
+            "Combined profile interpretation: PHQ-9 high + GAD-7 low = primary depression; "
+            "GAD-7 high + PHQ-9 lower = primary anxiety; both high = comorbid or mixed state. "
+            "AI trigger: P(Anxiety) > 0.55 → recommend GAD-7; "
+            "total anxiety confidence × entropy threshold → flag for clinical assessment."
+        ),
+    },
+    {
+        "id": "at_003", "category": "assessment",
+        "title": "C-SSRS: Columbia Suicide Severity Rating Scale",
+        "content": (
+            "C-SSRS (Posner et al.) — FDA-recognized gold standard for suicide risk assessment. "
+            "Ideation Subscale: Level 1 — Wish to be dead (passive); "
+            "Level 2 — Non-specific active suicidal thoughts; "
+            "Level 3 — Active ideation + method (no plan/intent); "
+            "Level 4 — Active ideation + plan (no intent — HIGH RISK); "
+            "Level 5 — Active ideation + plan + intent (IMMINENT RISK). "
+            "Behavior Subscale: Preparatory acts (acquiring means, writing notes), "
+            "Aborted attempt, Interrupted attempt, Actual attempt (any = HIGH RISK). "
+            "NSSI: deliberate self-injury without suicidal intent — separate track. "
+            "Intensity measures: frequency, duration, controllability, deterrents, reasons. "
+            "Screening C-SSRS (2 questions): 'Have you wished you were dead?' + "
+            "'Have you had thoughts of killing yourself?' — any 'yes' triggers full C-SSRS. "
+            "Intensifiers (elevate risk level): recent discharge, anniversary, male sex, "
+            "previous attempt, hopelessness, impulsivity, access to lethal means, intoxication. "
+            "Documentation: verbatim patient statements required — never paraphrase. "
+            "AI trigger rule: any explicit suicidal content in transcript → C-SSRS protocol + "
+            "crisis lines + STOP CBT module. Human clinician contact mandatory."
+        ),
+    },
+    {
+        "id": "at_004", "category": "assessment",
+        "title": "PCL-5, IES-R: PTSD Assessment Tools",
+        "content": (
+            "PCL-5 (PTSD Checklist for DSM-5): 20-item self-report scored 0–4. Range 0–80. "
+            "Provisional PTSD cutoff: ≥33 (some guidelines ≥31). "
+            "Four symptom clusters: Intrusion (5 items), Avoidance (2 items), "
+            "Negative cognitions/mood (7 items), Hyperarousal (6 items). "
+            "Treatment response: ≥10–20 point reduction = reliable change. "
+            "Life Events Checklist-5 (LEC-5): administered with PCL-5 to document Criterion A "
+            "trauma exposure (16 types). "
+            "Impact of Event Scale-Revised (IES-R): 22 items; subscales for intrusion, "
+            "avoidance, and hyperarousal; older measure, still widely used. "
+            "Distinguishing PTSD from MDD: PTSD has trauma-linked avoidance and re-experiencing; "
+            "MDD has pervasive anhedonia without trauma-specific triggers. "
+            "Distinguishing PTSD from Anxiety: PTSD requires Criterion A traumatic event; "
+            "GAD is non-trauma-specific. "
+            "Complex PTSD (ICD-11): PCL-5 does not capture disturbances in self-organization — "
+            "use ITQ (International Trauma Questionnaire) for ICD-11 C-PTSD screening. "
+            "AI flag: transcript mentions traumatic events, nightmares, flashbacks, "
+            "avoidance, hypervigilance → recommend PCL-5 + specialist trauma assessment."
+        ),
+    },
+    {
+        "id": "at_005", "category": "assessment",
+        "title": "AUDIT, DAST, CAGE: Substance Use Screening",
+        "content": (
+            "AUDIT (WHO Alcohol Use Disorders Identification Test): 10 items, 0–40 score. "
+            "0–7 Low risk; 8–15 Hazardous use (brief advice needed); "
+            "16–19 Harmful use (brief intervention + monitoring); "
+            "20–40 Likely dependence (specialist referral mandatory). "
+            "AUDIT-C (first 3 items): sensitivity screening; ≥4 men, ≥3 women = positive. "
+            "CAGE (4 questions): Have you felt you should Cut down? Have people Annoyed you "
+            "by criticizing your drinking? Have you felt Guilty? Have you needed an "
+            "Eye-opener? Score ≥2 indicates significant alcohol problem. "
+            "DAST-10 (Drug Abuse Screening Test): 10 yes/no items. "
+            "0 No problem; 1–2 Low; 3–5 Moderate (intensive outreach); "
+            "6–8 Substantial; 9–10 Severe (immediate referral). "
+            "Dual diagnosis rule: 60% of SUD patients have comorbid mental health condition. "
+            "Temporal relationship is diagnostically critical: "
+            "Substance-INDUCED vs. substance-USE comorbidity requires 4–6 weeks abstinence "
+            "to differentiate true psychiatric disorder from substance-induced symptoms. "
+            "AI flag: mention of regular alcohol/drug use in transcript → AUDIT + DAST "
+            "recommendation; never assume substance use is 'just recreational'."
+        ),
+    },
+    {
+        "id": "at_006", "category": "assessment",
+        "title": "Y-BOCS, ISI, SPIN, EPDS, SCARED: Specialized Screening",
+        "content": (
+            "Yale-Brown OCS Scale (Y-BOCS): 10 items, clinician-rated, 0–40. "
+            "0–7 Subclinical; 8–15 Mild; 16–23 Moderate; 24–31 Severe; 32+ Extreme. "
+            "Must specify obsession/compulsion subtypes. Treatment target: ≥35% reduction. "
+            "Insomnia Severity Index (ISI): 7 items, 0–28. "
+            "0–7 No insomnia; 8–14 Subthreshold; 15–21 Moderate; 22–28 Severe. "
+            "CBT-I is first-line (not medication) for scores ≥15. "
+            "Social Phobia Inventory (SPIN): 17 items; cutoff ≥19 indicates SAD. "
+            "Edinburgh Postnatal Depression Scale (EPDS): 10 items for perinatal depression. "
+            "Screen at: first antenatal visit, 28 weeks, 6 weeks postnatal, 12 weeks postnatal. "
+            "Cutoff ≥13 (≥10 for initial screening). Item 10 (self-harm) → immediate safety. "
+            "SCARED (Screen for Child Anxiety Related Disorders): 41 items, child/parent report. "
+            "Screens for GAD, social anxiety, panic disorder, separation anxiety, school refusal. "
+            "Cutoff ≥25 overall. Validated 8–18 years. "
+            "GDS-15 (Geriatric Depression Scale): 15 yes/no items for elderly depression. "
+            "Avoids somatic items that overlap with medical conditions. Score ≥6 = depression."
+        ),
+    },
+    {
+        "id": "at_007", "category": "assessment",
+        "title": "Mental Status Examination and Biopsychosocial Risk Assessment",
+        "content": (
+            "Mental Status Examination (MSE) — standard clinical documentation: "
+            "Appearance (grooming, dress, self-care), Behavior (psychomotor agitation/retardation, "
+            "eye contact, rapport), Speech (rate, volume, pressure, poverty), "
+            "Mood (subjective — patient's words), Affect (observed — range flat→labile, "
+            "reactivity, congruence with mood/content), "
+            "Thought Form (logical, tangential, circumstantial, flight of ideas, thought block, "
+            "perseveration, loosening of associations), "
+            "Thought Content (delusions — type, conviction; obsessions; phobias; "
+            "suicidal ideation — passive/active, plan, intent; homicidal ideation), "
+            "Perceptions (hallucinations — modality, command, commentary; "
+            "illusions; depersonalization/derealization), "
+            "Cognition (orientation × 3, short-term memory, concentration, "
+            "abstract thinking; formal MoCA/MMSE if indicated), "
+            "Insight (none/partial/full), Judgment (ability to make reasonable decisions). "
+            "Biopsychosocial Risk: Biological (family history, previous episodes, medical, "
+            "medications, substances); Psychological (hopelessness, impulsivity, rigidity, "
+            "previous attempts, trauma history); Social (isolation, means access, losses, "
+            "finances, domestic violence, housing). Document ALL risk factors."
+        ),
+    },
+    {
+        "id": "at_008", "category": "assessment",
+        "title": "MoCA, MMSE: Cognitive Screening Tools",
+        "content": (
+            "Mini-Mental State Examination (MMSE): 30-point scale screening for dementia. "
+            "Domains: Orientation (10), Registration (3), Attention/Calculation (5), "
+            "Recall (3), Language (8), Visuospatial (1). "
+            "Scoring: 24–30 Normal; 18–23 Mild impairment; 0–17 Severe impairment. "
+            "Limitation: poor sensitivity for Mild Cognitive Impairment (MCI); "
+            "ceiling effect in high-education patients; language-dependent. "
+            "Montreal Cognitive Assessment (MoCA): 30-point, more sensitive than MMSE for MCI. "
+            "Domains: visuospatial/executive, naming, attention, language, abstraction, "
+            "delayed recall, orientation. Normal ≥26 (adjusted for education: +1 if <12 years). "
+            "MoCA now available in Hindi, Tamil, Telugu, Marathi, Bengali (Indian languages). "
+            "Addenbrooke's Cognitive Examination III (ACE-III): 100-point, more detailed; "
+            "used when full cognitive profile needed. "
+            "Clock Drawing Test: quick, culture-fair executive + visuospatial screen. "
+            "Important: cognitive testing is affected by depression, anxiety, fatigue, and "
+            "pain — always interpret in clinical context. A depressed patient may score "
+            "poorly due to pseudodementia (depression-related cognitive impairment) — "
+            "must be distinguished from true dementia by treatment response."
+        ),
+    },
+    {
+        "id": "at_009", "category": "assessment",
+        "title": "BDI-II, BAI, HAM-D, PANSS, GAF, WHODAS: Specialized Scales",
+        "content": (
+            "Beck Depression Inventory-II (BDI-II): 21 items, 0–63. "
+            "0–13 Minimal; 14–19 Mild; 20–28 Moderate; 29–63 Severe. "
+            "More sensitive to cognitive symptoms of depression than PHQ-9. "
+            "Beck Anxiety Inventory (BAI): 21 items, somatic anxiety focus, 0–63. "
+            "0–7 Minimal; 8–15 Mild; 16–25 Moderate; 26–63 Severe. "
+            "Hamilton Rating Scale for Depression (HAM-D/HDRS): 17–21 items, clinician-rated. "
+            "Gold standard in antidepressant RCTs. Score ≥24 = severe. "
+            "Hamilton Anxiety Rating Scale (HAM-A): 14 items, clinician-rated. "
+            "Positive and Negative Syndrome Scale (PANSS): 30 items for schizophrenia. "
+            "Positive (7), Negative (7), General Psychopathology (16) subscales. "
+            "Used in antipsychotic trials; guides treatment augmentation decisions. "
+            "Global Assessment of Functioning (GAF): 1–100 scale combining symptom severity "
+            "and functional impairment; used in treatment planning and research. "
+            "WHODAS 2.0 (WHO Disability Assessment Schedule): 12-item, domain-specific "
+            "functional impairment; culturally validated internationally including India. "
+            "Measures: cognition, mobility, self-care, relationships, life activities, participation."
+        ),
+    },
+
+    # ──────────────────────────────────────────────────────────────
+    # SECTION 3 ▸ MOOD DISORDERS  (docs md_001–md_005)
+    # ──────────────────────────────────────────────────────────────
+    {
+        "id": "md_001", "category": "depression",
+        "title": "Major Depressive Disorder: DSM-5-TR Criteria and CBT Formulation",
+        "content": (
+            "MDD DSM-5-TR: ≥5 symptoms most of day, nearly every day, for ≥2 weeks. "
+            "Must include depressed mood OR anhedonia. Plus ≥4 of: weight/appetite change, "
+            "insomnia/hypersomnia, psychomotor agitation or retardation (observable), "
+            "fatigue/energy loss, worthlessness or excessive/inappropriate guilt, "
+            "impaired concentration or indecisiveness, recurrent thoughts of death/suicidal ideation. "
+            "Specifiers: single episode or recurrent; mild/moderate/severe; "
+            "with psychotic features; with anxious distress; with mixed features; "
+            "with melancholic features; with atypical features; with peripartum onset; "
+            "with seasonal pattern (SAD). "
+            "Beck's Negative Triad: negative view of SELF ('I am worthless/defective'), "
+            "negative view of WORLD ('Obstacles everywhere, nothing works'), "
+            "negative view of FUTURE ('Nothing will improve, hopelessness'). "
+            "Maintenance cycle: Depression → behavioral withdrawal → reduced mastery/pleasure "
+            "→ reinforced negative cognitions → deepening depression. "
+            "Rule out: bipolar (always screen for manic/hypomanic history), "
+            "medical causes (hypothyroidism, anaemia, vitamin B12 deficiency, Cushing's), "
+            "substance-induced depression, bereavement. "
+            "Treatment: Mild = guided self-help CBT. Moderate = CBT or SSRI (patient choice, NICE NG222). "
+            "Severe = combined CBT + SSRI. Psychotic features = antipsychotic + antidepressant."
+        ),
+    },
+    {
+        "id": "md_002", "category": "depression",
+        "title": "Behavioral Activation and Activity Scheduling for Depression",
+        "content": (
+            "Behavioral Activation (BA, Lewinsohn; refined by Martell): targets the depression "
+            "withdrawal cycle — action precedes mood, not the reverse. "
+            "Step 1 — Activity Monitoring: patient records activities hourly for 1 week, "
+            "rates Mood (0–10) and Mastery (0–10) per activity. Identifies avoidance patterns. "
+            "Step 2 — Values Identification: what mattered before depression? "
+            "(family, work, creativity, health, spirituality, community, friendships). "
+            "Step 3 — Graded Activity Scheduling: plan values-consistent activities starting "
+            "with lowest-effort, highest-reward. Graded task assignment for severe anergy. "
+            "Step 4 — TRAP to TRAC: Trigger → Response → Avoidance Pattern (problem) "
+            "vs. Trigger → Response → Alternative Coping (adaptive). "
+            "Step 5 — Anti-rumination strategies: rumination is a behavior, not just a thought — "
+            "redirect to engaged activity ('What can I do right now that requires full attention?'). "
+            "Step 6 — Problem-solving for activity barriers. "
+            "Step 7 — Relapse prevention plan: early warning signs + action plan. "
+            "BA as effective as full CBT for moderate depression (Dimidjian RCT). "
+            "Particularly effective when cognitive access to negative thoughts is low "
+            "(severe depression, limited verbal/insight capacity, low education)."
+        ),
+    },
+    {
+        "id": "md_003", "category": "bipolar",
+        "title": "Bipolar Disorder I, II, and Cyclothymia: Full Clinical Picture",
+        "content": (
+            "Bipolar I: full manic episode ≥7 days (or any duration if hospitalized or "
+            "psychotic). Mania: elevated/expansive/irritable mood + ≥3 symptoms "
+            "(grandiosity, decreased sleep without fatigue, pressured speech, racing thoughts, "
+            "distractibility, increased goal-directed activity, impulsive risk-taking). "
+            "Bipolar II: hypomanic episodes (≥4 days, not hospitalized, no psychotic features) "
+            "+ MDD. Often misdiagnosed as unipolar depression — leads to antidepressant-induced "
+            "rapid cycling. Screen EVERY depressed patient for manic/hypomanic history. "
+            "Cyclothymia: ≥2 years of alternating hypomanic and depressive symptoms "
+            "not meeting full criteria. "
+            "Bipolar depression vs. MDD: increased sleep, increased appetite, "
+            "leaden paralysis, psychomotor retardation, earlier age of onset, "
+            "family history of BD, history of antidepressant-induced hypomania. "
+            "Mixed features specifier: manic/hypomanic episode with 3+ depressive symptoms "
+            "(high suicide risk). "
+            "Treatment: Mood stabilizers first-line (lithium Level A, valproate, lamotrigine). "
+            "NEVER prescribe antidepressants without mood stabilizer — manic switch risk. "
+            "Psychotherapy adjunct: IPSRT (Interpersonal and Social Rhythm Therapy), "
+            "psychoeducation (Colom & Vieta), family-focused therapy. "
+            "Lithium requires: TFTs, renal function, serum levels (target 0.6–1.0 mEq/L) regularly."
+        ),
+    },
+    {
+        "id": "md_004", "category": "depression",
+        "title": "PDD, Grief, Adjustment Disorder, and DMDD",
+        "content": (
+            "Persistent Depressive Disorder (PDD/Dysthymia): depressed mood most days ≥2 years, "
+            "plus ≥2: poor appetite/overeating, insomnia/hypersomnia, low energy, "
+            "low self-esteem, poor concentration, hopelessness. "
+            "Double depression: PDD + superimposed MDD — poorer prognosis. "
+            "CBT for PDD targets schema-level core beliefs, not just symptom management. "
+            "Prolonged Grief Disorder (PGD, DSM-5-TR 2022): ≥12 months after loss (≥6 in children), "
+            "daily intense yearning + ≥3: disbelief, identity disruption, avoidance, "
+            "intense emotional pain, difficulty engaging, emotional numbness, "
+            "feeling life is meaningless, bitterness. "
+            "Treatment: Complicated Grief Treatment (CGT, Shear) — combines IPT + CBT. "
+            "Standard CBT for depression is insufficient — grief content must be processed directly. "
+            "Adjustment Disorder: maladaptive response to identifiable stressor within 3 months. "
+            "Subtypes: depressed mood, anxious, mixed, disturbance of conduct, mixed. "
+            "Resolves within 6 months of stressor cessation. "
+            "Disruptive Mood Dysregulation Disorder (DMDD, DSM-5): children 6–18; "
+            "severe recurrent temper outbursts + persistent irritable/angry mood most days. "
+            "Reduces overdiagnosis of bipolar in children. Parent-management training + CBT."
+        ),
+    },
+    {
+        "id": "md_005", "category": "treatment_resistant",
+        "title": "Treatment-Resistant Depression: Stepped Protocols",
+        "content": (
+            "Treatment-Resistant Depression (TRD): failure to respond to ≥2 adequate trials "
+            "(correct dose × ≥6 weeks each of different classes). Affects ~30% of MDD patients. "
+            "Before labeling TRD: confirm MDD diagnosis (not bipolar), assess medication "
+            "adherence, check adequate dose and duration, rule out comorbidities "
+            "(active substance use, thyroid dysfunction, personality disorder, PTSD), "
+            "review psychosocial maintaining factors. "
+            "Augmentation strategies (evidence-based): "
+            "Lithium augmentation (Level A — gold standard); "
+            "atypical antipsychotic augmentation (aripiprazole, quetiapine, olanzapine); "
+            "SNRI + SSRI combination (serotonin syndrome risk — monitor); "
+            "thyroid hormone T3 augmentation; mirtazapine combination. "
+            "Esketamine (Spravato) nasal spray: FDA-approved 2019 for TRD; "
+            "rapid onset (hours–days); must be administered in certified healthcare setting; "
+            "dissociative side effects; risk of misuse. "
+            "ECT: most effective treatment for severe/TRD (70–90% response); "
+            "indicated for severe MDD, psychotic features, high suicide risk, pregnancy. "
+            "TMS (Transcranial Magnetic Stimulation): NICE-approved; outpatient; "
+            "stimulates left dorsolateral prefrontal cortex. "
+            "AI flag: history of multiple treatment failures → mandatory tertiary psychiatry referral."
+        ),
+    },
+
+    # ──────────────────────────────────────────────────────────────
+    # SECTION 4 ▸ ANXIETY SPECTRUM  (docs anx_001–anx_006)
+    # ──────────────────────────────────────────────────────────────
+    {
+        "id": "anx_001", "category": "anxiety",
+        "title": "Generalized Anxiety Disorder: Worry Models and CBT Protocol",
+        "content": (
+            "GAD DSM-5: excessive, uncontrollable worry about multiple domains ≥6 months + "
+            "≥3 of: restlessness, fatigue, concentration difficulty, irritability, muscle "
+            "tension, sleep disturbance. Functional impairment required. "
+            "Borkovec's Avoidance Theory: worry is maintained by negative reinforcement — "
+            "brief relief from emotional distress, illusion of preparedness, "
+            "avoids deeper emotional processing, sometimes 'confirmed' by correct predictions. "
+            "Dugas's Intolerance of Uncertainty (IU) Model: core mechanism is inability to "
+            "tolerate any uncertainty → information-seeking, reassurance, avoidance, "
+            "over-preparation. IU is transdiagnostic. "
+            "CBT protocol: psychoeducation, worry awareness monitoring, worry time "
+            "(20 min/day, defer worry outside this window), cognitive restructuring of "
+            "probability overestimation and catastrophizing, problem-solving for solvable "
+            "worries, uncertainty exposure for hypothetical worries (tolerating not knowing), "
+            "intolerance of uncertainty experiments, mindfulness/present-moment focus. "
+            "Avoidance of reassurance: giving reassurance REINFORCES worry — both therapist "
+            "and chatbot must avoid this. "
+            "Distinguish worry (GAD) from obsessions (OCD): worry is ego-syntonic and about "
+            "real-life concerns; obsessions are ego-dystonic and often bizarre."
+        ),
+    },
+    {
+        "id": "anx_002", "category": "anxiety",
+        "title": "Panic Disorder, Agoraphobia: Clark's Model and Treatment",
+        "content": (
+            "Panic Disorder: recurrent unexpected panic attacks + ≥1 month of anticipatory "
+            "anxiety or significant avoidance. "
+            "Panic attack: ≥4 of 13 symptoms peaking within 10 minutes: palpitations, sweating, "
+            "trembling, shortness of breath, choking sensation, chest pain, nausea, dizziness, "
+            "derealization, fear of losing control, fear of dying, paraesthesias, chills/hot flushes. "
+            "Clark's Cognitive Model (1986): catastrophic misinterpretation of benign bodily "
+            "sensations triggers the panic spiral — sensation → misinterpretation → arousal "
+            "→ more sensations → peak panic. "
+            "Maintaining factors: safety behaviors (sitting, leaving, holding wall), "
+            "interoceptive avoidance (avoiding exercise, caffeine, heat), "
+            "situational avoidance (places associated with past attacks = agoraphobia). "
+            "Agoraphobia: fear/avoidance of 2+ situations (public transport, open spaces, "
+            "shops, crowds, outside alone). Can develop with or without panic disorder. "
+            "CBT protocol: psychoeducation + breathing retraining + cognitive restructuring "
+            "of misinterpretations + interoceptive exposure (spinning chair, running, "
+            "breathing through straw — deliberately induce sensations) + situational exposure "
+            "+ drop safety behaviors. "
+            "Interoceptive exposure is the most potent component — fear of sensations must be targeted directly."
+        ),
+    },
+    {
+        "id": "anx_003", "category": "anxiety",
+        "title": "Social Anxiety Disorder and Health Anxiety",
+        "content": (
+            "Social Anxiety Disorder (SAD): intense fear of social/performance situations "
+            "due to fear of negative evaluation. Prevalence ~12% lifetime — "
+            "second most common anxiety disorder. "
+            "Clark & Wells model: entering social situation → activates assumptions "
+            "('I'm boring/stupid/unacceptable') → self-focused attention ('observer perspective') "
+            "+ safety behaviors (avoiding eye contact, over-preparation) → perceived poor "
+            "performance → confirms feared outcome → post-event rumination. "
+            "CBT interventions: attention training (away from self-focus), video feedback "
+            "(to correct distorted self-image), systematic drop of safety behaviors, "
+            "behavioral experiments in feared social situations, cognitive restructuring "
+            "of probability of negative evaluation and shame beliefs. "
+            "SPIN cutoff ≥19 indicates SAD. "
+            "Health Anxiety (Salkovskis model): neutral body symptom → misinterpreted as "
+            "serious illness → anxiety → hypervigilance → more symptoms noticed. "
+            "Maintained by: checking (internet, body palpation, reassurance from doctors), "
+            "avoidance (medical programmes, disease-related content). "
+            "CBT: restructure misinterpretation; exposure to feared health triggers; "
+            "stop ALL reassurance-seeking and checking. "
+            "Distinguish Health Anxiety from Somatic Symptom Disorder: HA = preoccupation "
+            "with possibility of illness; SSD = distress about existing symptoms."
+        ),
+    },
+    {
+        "id": "anx_004", "category": "anxiety",
+        "title": "OCD and Related Disorders: ERP Protocol",
+        "content": (
+            "OCD DSM-5: obsessions AND/OR compulsions consuming >1 hour/day or causing "
+            "significant impairment. Ego-dystonic (unwanted, distressing). "
+            "Salkovskis model: normal intrusive thoughts → catastrophic appraisal "
+            "('Having this thought means I'm dangerous/bad') → neutralizing compulsion "
+            "→ short-term relief → long-term maintenance of obsessions. "
+            "OCD subtypes: contamination/washing, harm obsessions/checking, symmetry/ordering, "
+            "taboo thoughts (sexual, religious, violent — Pure O), hoarding disorder. "
+            "First-line: Exposure and Response Prevention (ERP) + SSRI (higher doses: "
+            "sertraline 200mg, fluoxetine 60–80mg). ERP: anxiety hierarchy → voluntary exposure "
+            "to obsessive trigger → prevent compulsive response → allow anxiety to habituate. "
+            "Y-BOCS ≥16 = moderate severity → active treatment. "
+            "Related disorders (OC spectrum): Body Dysmorphic Disorder (BDD — preoccupation "
+            "with imagined defect; ERP + mirror retraining), Hoarding Disorder "
+            "(specialized CBT with motivational work), Trichotillomania (HRT — Habit "
+            "Reversal Training), Excoriation disorder (skin picking — HRT). "
+            "Critical rule: NEVER give reassurance to OCD — it is a compulsion and perpetuates the cycle. "
+            "Reassurance-seeking by AI chatbot reinforces OCD."
+        ),
+    },
+    {
+        "id": "anx_005", "category": "anxiety",
+        "title": "Specific Phobia and Exposure Therapy Principles",
+        "content": (
+            "Specific Phobia: marked fear/anxiety about specific object/situation — "
+            "immediate anxiety response, active avoidance or endured with dread, "
+            "disproportionate to actual danger, persistent ≥6 months, functionally impairing. "
+            "Types: Animal, Natural environment (heights, storms), Blood-injection-injury (BII — "
+            "unique vasovagal response → fainting; use Applied Tension not standard relaxation), "
+            "Situational (planes, elevators), Other (vomiting, choking, illness). "
+            "One-session treatment (OST, Öst): up to 3 hours intensive graded exposure — "
+            "highly effective (90% success) for specific phobias; participant-directed pace. "
+            "Exposure therapy principles: "
+            "(1) Habituation model: within-session anxiety reduces with prolonged exposure. "
+            "(2) Inhibitory learning model (Craske): new learning (stimulus not dangerous) "
+            "added to memory alongside fear memory — does not erase original. "
+            "(3) Drop safety behaviors: holding companion, medication, distraction "
+            "prevent inhibitory learning. "
+            "(4) Vary contexts during exposure: reduces return of fear. "
+            "(5) Retrieval cues during exposure improve recall during subsequent encounters. "
+            "Virtual Reality Exposure Therapy (VRET): FDA-cleared for phobias, PTSD; "
+            "growing evidence base, increasingly accessible."
+        ),
+    },
+    {
+        "id": "anx_006", "category": "anxiety",
+        "title": "Relaxation, Psychophysiology of Anxiety, and Breathing Retraining",
+        "content": (
+            "Anxiety activates HPA axis and sympathetic NS: cortisol + adrenaline release "
+            "→ heart rate increase, respiratory rate increase, muscle tension, "
+            "pupil dilation, digestion shutdown, hypervigilance, cognitive narrowing. "
+            "Chronic anxiety: hippocampal volume reduction, PFC hypoactivation, "
+            "amygdala hyperreactivity, HPA axis dysregulation. "
+            "Hyperventilation: blows off CO2 → respiratory alkalosis → peripheral vasoconstriction "
+            "→ dizziness, tingling, chest tightness, derealization (then misinterpreted as "
+            "dangerous by panic-prone individuals). "
+            "Diaphragmatic breathing (4-in, 6-out): target 8–12 breaths/min, activates "
+            "vagus nerve → parasympathetic tone. Practice 2×10 min daily. "
+            "Box breathing (4-4-4-4): military protocol for acute stress. "
+            "PMR (Progressive Muscle Relaxation, Jacobson): 16 muscle groups, "
+            "5-second tense + 30-second release. "
+            "Temperature (TIPP-T): cold water on face, ice on wrists → mammalian dive reflex "
+            "→ heart rate reduction within 30 seconds. Most evidence-based acute crisis technique. "
+            "Important: relaxation alone maintains avoidance and sensitizes some patients. "
+            "Applied relaxation (Öst): conditioned relaxation response used during "
+            "early anxiety cues — combined with exposure, not as substitute."
+        ),
+    },
+
+    # ──────────────────────────────────────────────────────────────
+    # SECTION 5 ▸ TRAUMA & STRESSOR-RELATED  (docs tr_001–tr_004)
+    # ──────────────────────────────────────────────────────────────
+    {
+        "id": "tr_001", "category": "trauma",
+        "title": "PTSD: DSM-5 Criteria, Models, and Evidence-Based Treatment",
+        "content": (
+            "PTSD DSM-5 Criterion A: direct/witnessed/learned/repeated exposure to "
+            "actual/threatened death, sexual violence, or serious injury. "
+            "Criterion B (Intrusion, ≥1): unwanted memories, flashbacks, nightmares, "
+            "psychological/physiological reactivity to cues. "
+            "Criterion C (Avoidance, ≥1): internal (memories, thoughts, feelings) "
+            "and external (people, places, situations) reminders. "
+            "Criterion D (Negative cognitions/mood, ≥2): distorted blame of self/others, "
+            "persistent negative beliefs, negative emotions, diminished interest, "
+            "detachment, inability to experience positive emotions. "
+            "Criterion E (Hyperarousal, ≥2): hypervigilance, exaggerated startle, "
+            "sleep disturbance, irritability/aggression, reckless behavior, concentration. "
+            "Duration >1 month, significant impairment. "
+            "Ehlers & Clark model: trauma not integrated as past event → "
+            "negative appraisals ('I am permanently damaged') + poor trauma memory elaboration "
+            "with strong perceptual triggers → current threat perception. "
+            "First-line treatments (WHO/NICE/APA): "
+            "TF-CBT, Prolonged Exposure (PE), CPT, EMDR — all equivalent efficacy. "
+            "NOT recommended: single-session debriefing (CISD), benzodiazepines. "
+            "Medications: SSRIs (sertraline, paroxetine) and SNRIs (venlafaxine) — "
+            "adjunct to trauma-focused therapy, not replacement. Prazosin for nightmares."
+        ),
+    },
+    {
+        "id": "tr_002", "category": "trauma",
+        "title": "Complex PTSD, Developmental Trauma, and Phase-Based Treatment",
+        "content": (
+            "Complex PTSD (ICD-11, not in DSM-5): prolonged repeated trauma — childhood "
+            "abuse, domestic violence, trafficking, captivity. "
+            "Standard PTSD criteria PLUS disturbances in self-organization (DSO): "
+            "(1) Affect dysregulation: explosive anger, emotional numbing, dissociation. "
+            "(2) Negative self-concept: persistent shame, guilt, worthlessness — 'I am broken.' "
+            "(3) Relational difficulties: inability to feel safe with others, distrust, "
+            "detachment from relationships. "
+            "Assess with: ITQ (International Trauma Questionnaire) — ICD-11 C-PTSD measure. "
+            "Phase-based treatment model (Herman 1992): "
+            "Phase 1 — Safety and Stabilization: grounding skills, emotion regulation, "
+            "psychoeducation, therapeutic alliance, practical safety. MUST be consolidated "
+            "before Phase 2. Premature trauma processing destabilizes C-PTSD patients. "
+            "Phase 2 — Trauma Processing: TF-CBT, EMDR, somatic experiencing (Levine), "
+            "sensorimotor psychotherapy. "
+            "Phase 3 — Integration and Reconnection: rebuilding identity, relationships, "
+            "meaning, post-traumatic growth. "
+            "Dissociation during trauma processing: slow down, return to Phase 1 skills. "
+            "Structural dissociation model (Van der Hart): guides pacing. "
+            "AI flag: shame-laden speech, history of prolonged abuse, emotional numbing "
+            "alongside depression → C-PTSD possibility → specialist trauma therapist referral."
+        ),
+    },
+    {
+        "id": "tr_003", "category": "trauma",
+        "title": "Dissociative Disorders: Types, Assessment, and Management",
+        "content": (
+            "Dissociative Disorders DSM-5: disruptions in normally integrated functions "
+            "of consciousness, identity, memory, behavior, perception, emotion, or sense of self. "
+            "Depersonalization/Derealization Disorder: persistent/recurrent detachment from "
+            "mental processes (depersonalization) or surroundings (derealization), "
+            "with intact reality testing. "
+            "Prevalence: 1–2% population. Triggered by anxiety, cannabis, trauma. "
+            "Dissociative Amnesia: inability to recall autobiographical information, "
+            "usually trauma-related. Dissociative fugue: purposeful travel with amnesia. "
+            "Dissociative Identity Disorder (DID): ≥2 distinct personality states, "
+            "recurrent amnesia gaps, significant distress. Highest association with "
+            "chronic childhood sexual/physical abuse. "
+            "Requires specialist dissociation-informed trauma therapy — "
+            "never attempt EMDR or direct trauma processing without stabilization. "
+            "Phase-oriented treatment: parts work, internal communication, "
+            "co-consciousness development, trauma processing in stable states. "
+                        "Assessment: Dissociative Experiences Scale (DES); MID (Multiscale "
+            "Dissociation Inventory) for DID. "
+            "AI flag: depersonalization, derealization, amnesia episodes, "
+            "'feeling unreal' in transcript → specialist referral; "
+            "do not attempt grounding techniques designed for anxiety without assessing "
+            "whether grounding is appropriate for this dissociative presentation."
+        ),
+    },
+    {
+        "id": "tr_004", "category": "trauma",
+        "title": "Acute Stress Disorder, Psychological First Aid, and Crisis Debriefing",
+        "content": (
+            "Acute Stress Disorder (ASD): same symptom criteria as PTSD but duration "
+            "3 days to 1 month after trauma. Presence of ASD predicts PTSD in ~50% of cases. "
+            "Watchful waiting is appropriate for first 2–4 weeks after a single-event trauma — "
+            "most people recover naturally with social support. "
+            "Psychological First Aid (PFA, WHO/IASC): evidence-informed, not evidence-based — "
+            "no RCTs possible in disaster settings, but expert consensus. "
+            "PFA principles (Look, Listen, Link): "
+            "Look — assess safety, needs, who needs help. "
+            "Listen — make compassionate contact, ask what happened, listen without pressure. "
+            "Link — connect to information, practical resources, social support, services. "
+            "PFA does NOT involve emotional processing or trauma narrative — "
+            "it is stabilization and connection, not therapy. "
+            "Critical Incident Stress Debriefing (CISD): evidence AGAINST — "
+            "meta-analyses show CISD may impair natural recovery by forcing premature "
+            "emotional processing and preventing natural avoidance-based healing. "
+            "NOT recommended for any trauma population. "
+            "Early interventions with evidence: trauma-focused CBT for ASD (prevents PTSD), "
+            "CBT-based self-help bibliotherapy, brief PE for high-risk individuals. "
+            "Mass casualty/disaster protocols: WHO mhGAP + PFA training; "
+            "Tele-MANAS India (14416) activated for disaster mental health response."
+        ),
+    },
+
+    # ──────────────────────────────────────────────────────────────
+    # SECTION 6 ▸ NEURODEVELOPMENTAL & COGNITIVE  (docs nd_001–nd_004)
+    # ──────────────────────────────────────────────────────────────
+    {
+        "id": "nd_001", "category": "neurodevelopmental",
+        "title": "Autism Spectrum Disorder: Diagnosis, Presentations, and Mental Health",
+        "content": (
+            "ASD DSM-5: persistent deficits in social communication/interaction across contexts + "
+            "restricted, repetitive patterns of behavior, interests, or activities. "
+            "Must be present in early development (may not fully manifest until social demands exceed "
+            "capacity); cause significant functional impairment. "
+            "Severity levels 1–3 based on support required. "
+            "Social communication deficits: social-emotional reciprocity (reduced), "
+            "nonverbal communication (atypical eye contact, gestures, facial expression), "
+            "developing/maintaining/understanding relationships. "
+            "Restricted/repetitive behaviors: stereotyped movements or speech, insistence on "
+            "sameness, ritualized routines, restricted/fixated interests, sensory hyper/hypo-reactivity. "
+            "Prevalence: 1 in 36 (CDC 2023). Male:female ~4:1 — women significantly underdiagnosed "
+            "due to masking/camouflaging. "
+            "Mental health comorbidities: Anxiety (40–60%), Depression (70% adults), ADHD (30–50%), "
+            "OCD (17–37%), psychosis (elevated), eating disorders, high suicide risk. "
+            "Adapted CBT for ASD: explicit, concrete, visual frameworks; no reliance on "
+            "social inference or metaphor; structured emotion identification tools "
+            "(Zones of Regulation, Emotion Thermometer). "
+            "Assessment tools: ADOS-2, ADI-R (gold standards); AQ-10 for adult screening. "
+            "Affirming approach: autism is neurodiversity, not a disorder to be corrected. "
+            "Target co-occurring mental health conditions, not autistic traits per se."
+        ),
+    },
+    {
+        "id": "nd_002", "category": "neurodevelopmental",
+        "title": "ADHD in Adults: Assessment, CBT, and Comorbidities",
+        "content": (
+            "Adult ADHD DSM-5: symptoms present since <12 years, in ≥2 settings, "
+            "causing functional impairment. ≥5 inattention OR hyperactivity-impulsivity symptoms "
+            "(lower threshold than children). "
+            "Inattention: failing to sustain attention, not following through on tasks, "
+            "poor organization, losing items, forgetfulness, distractibility. "
+            "Hyperactivity-Impulsivity: fidgeting, leaving seat, inability to relax, "
+            "'driven by a motor', talking excessively, blurting out, interrupting, can't wait. "
+            "Prevalence: ~5% adults; 60% of childhood ADHD persists into adulthood. "
+            "Predominantly Inattentive presentation most common in adults (especially women). "
+            "Assessment: ADHD-RS-IV, Conners' Adult ADHD Rating Scales (CAARS), "
+            "DIVA-2.0 (structured diagnostic interview for adults). "
+            "Rule out: sleep disorders (DSWPD), anxiety, depression, thyroid dysfunction, "
+            "substance use, learning disabilities, trauma/PTSD (mimics inattention). "
+            "CBT for Adult ADHD (Safren protocol): organization/planning systems "
+            "(external scaffolding), distractibility reduction, cognitive restructuring "
+            "of self-blame beliefs ('I'm lazy/stupid/broken') — sequelae of undiagnosed ADHD. "
+            "Combined treatment (stimulant + CBT) superior to either alone. "
+            "Stimulants (methylphenidate, amphetamine salts) first-line. "
+            "Non-stimulants (atomoxetine, bupropion) for comorbid substance use/tics/anxiety. "
+            "AI flag: chronic task incompletion, disorganization, relationship impairment → "
+            "recommend ADHD assessment before assuming primary depression/anxiety."
+        ),
+    },
+    {
+        "id": "nd_003", "category": "neurocognitive",
+        "title": "Dementia and Neurocognitive Disorders: Types and Management",
+        "content": (
+            "Major NCD (Dementia) DSM-5: significant cognitive decline in ≥1 domain "
+            "(complex attention, executive function, learning/memory, language, "
+            "perceptual-motor, social cognition) causing functional dependence. "
+            "NOT exclusively delirium or other mental disorder. "
+            "Types: Alzheimer's (60–70% — amyloid/tau pathology, insidious onset, "
+            "memory prominent); Vascular (stepwise or gradual, cardiovascular risk factors); "
+            "Lewy Body (visual hallucinations + Parkinsonism + REM sleep behavior disorder + "
+            "fluctuating cognition — avoid haloperidol: severe neuroleptic sensitivity); "
+            "Frontotemporal (personality/behavior change + language, <65 years, "
+            "executive dysfunction early); TBI-related. "
+            "Mild NCD (MCI): objective + subjective decline WITHOUT functional dependence. "
+            "20% progress to Major NCD per year. "
+            "BPSD (Behavioral and Psychological Symptoms of Dementia): depression, apathy, "
+            "agitation, psychosis, sleep disturbance — present in 90%+ at some point. "
+            "First-line for BPSD: non-pharmacological (structured activities, music therapy, "
+            "sensory stimulation, caregiver education, environmental modification). "
+            "Pharmacological for severe BPSD only: low-dose antipsychotics (with informed "
+            "consent about stroke risk); avoid benzodiazepines (worsen cognition). "
+            "Delirium: acute fluctuating confusion — medical emergency, not dementia. "
+            "Always reversible-cause hunt: UTI, medications, electrolytes, hypoxia, pain."
+        ),
+    },
+    {
+        "id": "nd_004", "category": "neurodevelopmental",
+        "title": "Intellectual Disability, Learning Disorders, and Tic Disorders",
+        "content": (
+            "Intellectual Disability (DSM-5): deficits in intellectual functions "
+            "(reasoning, problem-solving, abstract thinking — IQ ~2 SD below mean, ~70) "
+            "AND adaptive functioning (conceptual, social, practical) requiring ongoing support, "
+            "onset in developmental period. "
+            "Severity: Mild (IQ 50–70), Moderate (35–50), Severe (20–35), Profound (<20). "
+            "Mental health co-occurrence: 3–4× higher than general population. "
+            "Adapted CBT uses concrete language, visual aids, shorter sessions, caregiver involvement. "
+            "Specific Learning Disorder: difficulty learning/using academic skills despite adequate "
+            "instruction. Domains: reading (dyslexia), written expression (dysgraphia), "
+            "mathematics (dyscalculia). "
+            "Emotional impact: shame, low self-esteem, school avoidance — "
+            "CBT targets associated anxiety/depression, not the learning disorder itself. "
+            "Tourette's Disorder: multiple motor AND ≥1 vocal tic for >1 year, onset <18. "
+            "Persistent (Chronic) Motor/Vocal Tic Disorder: one type only. "
+            "CBIT (Comprehensive Behavioral Intervention for Tics): "
+            "Habit Reversal Training + function-based intervention — first-line. "
+            "Medications (fluphenazine, risperidone, clonidine) for severe/functionally impairing tics. "
+            "High comorbidity with OCD, ADHD — treat comorbidities actively."
+        ),
+    },
+
+    # ──────────────────────────────────────────────────────────────
+    # SECTION 7 ▸ PSYCHOTIC DISORDERS  (docs ps_001–ps_002)
+    # ──────────────────────────────────────────────────────────────
+    {
+        "id": "ps_001", "category": "psychosis",
+        "title": "Schizophrenia Spectrum: Diagnosis and Evidence-Based Treatment",
+        "content": (
+            "Schizophrenia DSM-5: ≥2 symptoms for ≥1 month (at least 1 must be from first 3): "
+            "delusions, hallucinations, disorganized speech, grossly disorganized/catatonic "
+            "behavior, negative symptoms. Total duration ≥6 months including prodrome. "
+            "Positive symptoms: hallucinations (most common: auditory — voices, commentary, "
+            "command), delusions (persecutory most common; grandiose, referential, somatic, "
+            "Capgras, Fregoli), thought disorder. "
+            "Negative symptoms: alogia (poverty of speech), avolition (lack of goal-directed "
+            "behavior), anhedonia, blunted affect, asociality. "
+            "Associated with poorer prognosis and greater functional impairment than positive. "
+            "Spectrum: Brief Psychotic Disorder (<1 month), Schizophreniform (1–6 months), "
+            "Schizoaffective Disorder (psychosis + mood episode), Delusional Disorder "
+            "(non-bizarre delusions without other psychotic features). "
+            "DUP (Duration of Untreated Psychosis): minimize — each month untreated associated "
+            "with worse long-term outcomes. Early Intervention in Psychosis (EIP) services. "
+            "Treatment: antipsychotic medication (essential, first-line) + CBTp + "
+            "family therapy + supported employment (IPS model). "
+            "AI flag: any psychotic content in transcript (voices, paranoia, thought insertion, "
+            "bizarre beliefs, disorganized speech) → immediate specialist psychiatric referral. "
+            "Do NOT engage with delusional content as real."
+        ),
+    },
+    {
+        "id": "ps_002", "category": "psychosis",
+        "title": "CBT for Psychosis (CBTp) and Psychoeducation",
+        "content": (
+            "CBTp (NICE-recommended for all schizophrenia spectrum disorders): "
+            "does NOT aim to eliminate symptoms — aims to reduce distress, increase insight, "
+            "improve functioning, and reduce relapse. "
+            "Core techniques: normalizing (psychosis on a continuum with normal experience), "
+            "developing alternative explanations for anomalous experiences, "
+            "examining evidence for delusional beliefs (not direct challenging), "
+            "reducing safety behaviors that maintain distress, "
+            "working with voice content and command voices. "
+            "ABC model adapted: Activating event (hearing voice) → Beliefs about it "
+            "('The voice will harm me if I disobey') → Consequences (anxiety, compliance). "
+            "Therapy targets beliefs about voices, not voices themselves. "
+            "Psychoeducation for patients and families: "
+            "Stress-Vulnerability model (Zubin & Spring): biological vulnerability + life stress "
+            "→ psychotic episode threshold. Reduces self-blame and family high expressed emotion. "
+            "High Expressed Emotion (HEE): critical comments, hostility, over-involvement "
+            "from family → relapse risk ×4. Family Intervention (Falloon model) targets HEE. "
+            "Medication adherence: psychoeducation, side effect management, "
+            "long-acting injections (LAI/depot) for adherence difficulties. "
+            "Clozapine: for treatment-resistant schizophrenia (≥2 adequate antipsychotic trials). "
+            "Requires CPMS registration, weekly then fortnightly blood monitoring (agranulocytosis risk)."
+        ),
+    },
+
+    # ──────────────────────────────────────────────────────────────
+    # SECTION 8 ▸ PERSONALITY DISORDERS  (docs pd_001–pd_003)
+    # ──────────────────────────────────────────────────────────────
+    {
+        "id": "pd_001", "category": "personality",
+        "title": "Borderline Personality Disorder: DBT and Risk Management",
+        "content": (
+            "BPD DSM-5: pervasive instability in interpersonal relationships, self-image, "
+            "and affect, plus marked impulsivity, beginning by early adulthood in ≥2 contexts. "
+            "≥5 of 9 criteria: fear of abandonment (real or imagined), "
+            "unstable intense relationships (idealization ↔ devaluation), identity disturbance, "
+            "impulsivity in ≥2 self-damaging areas, recurrent suicidal/self-harm behavior, "
+            "affective instability (dysphoric hours to days), chronic emptiness, "
+            "intense inappropriate anger, transient paranoia/dissociation under stress. "
+            "Linehan's Biosocial Model: biological emotional sensitivity + pervasive invalidating "
+            "environment → chronic emotion dysregulation. "
+            "Suicide and self-harm: 10% die by suicide; 70–75% attempt; "
+            "NSSI is usually emotion regulation, not suicidal intent — assess separately EVERY episode. "
+            "Never assume self-harm is 'just attention-seeking' — invalidating and increases risk. "
+            "First-line treatment: DBT (Level A). Schema Therapy also Level A. "
+            "MBT (Mentalization-Based Treatment): evidence-based alternative. "
+            "No medication has FDA approval for BPD core symptoms — avoid polypharmacy. "
+            "Psychiatric hospitalisation: generally brief and targeted; long-term hospitalisation "
+            "reinforces regression. "
+            "AI flag: identity instability + abandonment fears + impulsivity + NSSI in transcript "
+            "→ specialist referral; do not attempt CBT without specialist consultation."
+        ),
+    },
+    {
+        "id": "pd_002", "category": "personality",
+        "title": "Other Personality Disorders: Cluster A, B, and C",
+        "content": (
+            "DSM-5 personality disorders classified in three clusters: "
+            "Cluster A (Odd/Eccentric): "
+            "Paranoid PD: distrust/suspiciousness of others' motives, interprets benign "
+            "actions as threatening. "
+            "Schizoid PD: detachment from social relationships, restricted emotional expression, "
+            "prefers solitude. "
+            "Schizotypal PD: acute discomfort in close relationships, cognitive/perceptual "
+            "distortions, eccentric behavior — on schizophrenia spectrum. "
+            "Cluster B (Dramatic/Emotional): "
+            "Antisocial PD (ASPD): disregard for/violation of others' rights, deceitfulness, "
+            "impulsivity, lack of remorse. Requires prior conduct disorder before 15. "
+            "Narcissistic PD: grandiosity, need for admiration, lack of empathy. "
+            "Histrionic PD: excessive emotionality, attention-seeking. "
+            "Cluster C (Anxious/Fearful): "
+            "Avoidant PD: social inhibition, feelings of inadequacy, hypersensitivity to "
+            "negative evaluation — distinguished from SAD by more pervasive self-view. "
+            "Dependent PD: excessive need to be taken care of, submissive, clinging. "
+            "Obsessive-Compulsive PD (OCPD): preoccupation with orderliness, perfectionism, "
+            "and control — distinguished from OCD by ego-syntonic nature. "
+            "All PDs: treatment is long-term; Schema Therapy has broadest evidence across clusters. "
+            "Psychological formulation is essential before any intervention."
+        ),
+    },
+    {
+        "id": "pd_003", "category": "personality",
+        "title": "ICD-11 Personality Disorder: Dimensional Model",
+        "content": (
+            "ICD-11 (2022) replaced categorical PD diagnosis with a dimensional model — "
+            "major paradigm shift from DSM-5's categorical approach. "
+            "Step 1: Establish presence of Personality Disorder (marked disturbance in "
+            "self and interpersonal functioning, stable over time, not better explained by "
+            "another mental disorder, not substance/medical). "
+            "Step 2: Rate Severity — Mild (disturbances in some areas, intact in others), "
+            "Moderate (marked disturbances in multiple areas), Severe (pervasive, all areas). "
+            "Step 3: Apply Qualifiers (Trait Domain Specifiers): "
+            "Negative Affectivity (emotional instability, anxiousness, depressiveness); "
+            "Detachment (social withdrawal, emotional constriction); "
+            "Dissociality (callousness, deceitfulness, antagonism, manipulation); "
+            "Disinhibition (impulsivity, irresponsibility, risk-taking); "
+            "Anankastia (perfectionism, perseveration, rigidity). "
+            "Borderline Pattern Qualifier available as additional specifier. "
+            "Clinical advantages: reduces stigma, focuses on severity (which predicts outcome "
+            "and treatment intensity needed), encourages dimensional thinking. "
+            "Research implication: AI-based systems should ideally capture dimensional "
+            "features rather than categorical diagnoses."
+        ),
+    },
+
+    # ──────────────────────────────────────────────────────────────
+    # SECTION 9 ▸ EATING DISORDERS  (docs ed_001–ed_002)
+    # ──────────────────────────────────────────────────────────────
+    {
+        "id": "ed_001", "category": "eating_disorders",
+        "title": "Anorexia Nervosa, Bulimia Nervosa, and BED",
+        "content": (
+            "Anorexia Nervosa (AN): restriction of energy intake → significantly low body weight "
+            "(BMI <18.5) + intense fear of gaining weight + disturbance in body image/experience. "
+            "Subtypes: restricting, binge/purge. Highest mortality of any psychiatric condition "
+            "(5–10%) — cardiac complications, suicide. "
+            "Medical risks: hypokalaemia (cardiac arrhythmia), refeeding syndrome, "
+            "osteoporosis, amenorrhea, anaemia. BMI <16 = severe; <15 = imminent risk. "
+            "Treatment: FBT (Family-Based Treatment/Maudsley Approach) for adolescents — "
+            "Level A. SSCM (Specialist Supportive Clinical Management) or CBT-E for adults. "
+            "Weight restoration MUST precede psychological therapy — "
+            "starvation impairs emotional processing capacity. "
+            "Bulimia Nervosa (BN): recurrent binges (large amount + sense of loss of control) "
+            "+ compensatory behaviors (purging, laxatives, fasting, excessive exercise) "
+            "≥1×/week for 3 months. Normal or above-average weight. "
+            "CBT-BN (Fairburn): targets dietary restraint → binge → purge cycle. "
+            "Level A evidence. Self-help CBT (Overcoming Bulimia) also effective. "
+            "Binge Eating Disorder (BED): recurrent binges without compensatory behaviors. "
+            "Most prevalent eating disorder. CBT-E, IPT, DBT, lisdexamfetamine (FDA-approved). "
+            "ARFID: sensory aversion/fear of adverse consequences/low interest — not body image. "
+            "Behavioral approaches with systematic desensitization to food textures."
+        ),
+    },
+    {
+        "id": "ed_002", "category": "eating_disorders",
+        "title": "Eating Disorder Assessment, Medical Monitoring, and Pica",
+        "content": (
+            "EDE-Q (Eating Disorder Examination Questionnaire): 28-item self-report; "
+            "subscales: restraint, eating concern, shape concern, weight concern. "
+            "EDE (clinician-administered): gold standard for eating disorder diagnosis. "
+            "SCOFF questionnaire (5-item screening): ≥2 positive indicates likely eating disorder. "
+            "Medical monitoring in eating disorders: "
+            "Vitals: bradycardia (<50 bpm), hypotension, hypothermia — signs of medical instability. "
+            "Bloods: FBC, U&E (hypokalaemia, hypophosphataemia), LFTs, glucose, TFTs, bone density. "
+            "ECG: QTc prolongation risk with hypokalaemia. "
+            "MARSIPAN guidelines (UK): medical management criteria for AN inpatients. "
+            "Refeeding syndrome: occurs when malnourished patients are refed too rapidly — "
+            "hypophosphataemia → cardiac/respiratory failure. "
+            "Refeeding must be slow and monitored — start ≤20 kcal/kg/day in severe AN. "
+            "Inpatient indications: BMI <15, rapid weight loss, medical instability, "
+            "severe self-harm, no response to outpatient treatment. "
+            "Pica: eating non-nutritive, non-food substances persistently for ≥1 month. "
+            "Common in ID, ASD, pregnancy, iron deficiency. Medical risks: toxicity, infection. "
+            "Rumination Disorder: repeated regurgitation/rechewing — behavioral treatment. "
+            "AI flag: weight concerns, food restriction, purging behaviors in transcript → "
+            "recommend eating disorder specialist; never provide dietary advice."
+        ),
+    },
+
+    # ──────────────────────────────────────────────────────────────
+    # SECTION 10 ▸ SUBSTANCE USE DISORDERS  (docs su_001–su_002)
+    # ──────────────────────────────────────────────────────────────
+    {
+        "id": "su_001", "category": "substance_use",
+        "title": "Substance Use Disorders: Diagnosis, Assessment, and Treatment",
+        "content": (
+            "SUD DSM-5: problematic substance use causing significant impairment in ≥2 of "
+            "11 criteria within 12 months: taking more/longer than intended, unsuccessful "
+            "control attempts, craving, failure at role obligations, social/interpersonal "
+            "problems, reducing important activities, hazardous use, continued use despite "
+            "problems, tolerance (increased amounts needed), withdrawal. "
+            "Mild (2–3), Moderate (4–5), Severe (6+). "
+            "Classes: alcohol, cannabis, hallucinogens (PCP, others), inhalants, opioids, "
+            "sedatives/hypnotics/anxiolytics, stimulants (amphetamine, cocaine), tobacco, other. "
+            "Withdrawal risk: alcohol and benzodiazepines — LIFE-THREATENING "
+            "(seizures, delirium tremens) → medical management mandatory before psychological Tx. "
+            "CIWA-Ar scale for alcohol withdrawal severity monitoring. "
+            "Opioid withdrawal: severe discomfort, rarely fatal; opioid substitution therapy "
+            "(methadone, buprenorphine) is evidence-based harm reduction. "
+            "Evidence-based psychological treatments: "
+            "MI for engagement; CBT for relapse prevention (identify triggers → alternative coping); "
+            "Contingency Management (strongest evidence for stimulants — voucher reinforcement); "
+            "12-step facilitation; MBRP (mindfulness-based relapse prevention); "
+            "Network therapy for social support restructuring. "
+            "Harm reduction principle: reduce consequences of use when abstinence not achievable. "
+            "AUDIT, DAST, CAGE for screening — see assessment section."
+        ),
+    },
+    {
+        "id": "su_002", "category": "substance_use",
+        "title": "Dual Diagnosis, Gaming Disorder, and Gambling Disorder",
+        "content": (
+            "Dual Diagnosis (co-occurring SUD + mental health disorder): "
+            "60% of SUD patients have comorbid mental health condition. "
+            "Two pathways: self-medication (using substances to manage mental health symptoms) "
+            "and substance-induced (substance use causes psychiatric symptoms). "
+            "Temporal relationship critical: 4–6 weeks abstinence needed to distinguish "
+            "true psychiatric disorder from substance-induced syndrome. "
+            "Integrated Dual Diagnosis Treatment (IDDT): simultaneous treatment of both — "
+            "superior to sequential. "
+            "Sequential treatment ('mental health first' or 'SUD first') has poorer outcomes. "
+            "Gambling Disorder DSM-5: persistent problematic gambling causing impairment. "
+            "4+ criteria: preoccupied with gambling, needs increasing amounts, "
+            "unsuccessful cessation attempts, restless/irritable when trying to stop, "
+            "chasing losses, lying, jeopardizing relationships, relying on others for money. "
+            "Treatment: CBT for gambling (thought restructuring + exposure/response prevention "
+            "for urges + problem-solving); naltrexone reduces gambling urges; GA (12-step). "
+            "Internet Gaming Disorder (ICD-11 Gaming Disorder 2022): impaired control over "
+            "gaming + increasing priority over other activities + continuation despite negatives "
+            "≥12 months. Particularly prevalent in Indian urban youth (10–15% problematic gaming). "
+            "Treatment: CBT, family involvement, structured screen-time protocols, "
+            "treating comorbid depression/anxiety/ADHD. "
+            "AI flag: gaming/gambling financial consequences, relationship impact, "
+            "loss of control → recommend specialist assessment."
+        ),
+    },
+
+    # ──────────────────────────────────────────────────────────────
+    # SECTION 11 ▸ SLEEP DISORDERS  (docs sl_001–sl_002)
+    # ──────────────────────────────────────────────────────────────
+    {
+        "id": "sl_001", "category": "sleep",
+        "title": "Insomnia Disorder and CBT-I: Complete Protocol",
+        "content": (
+            "Insomnia Disorder: dissatisfaction with sleep quality/quantity ≥3 nights/week "
+            "for ≥3 months, despite adequate opportunity and circumstances, causing distress/impairment. "
+            "Spielman's 3P Model: Predisposing (trait hyperarousal, anxiety, perfectionism), "
+            "Precipitating (stress, medical event, loss), Perpetuating (conditioned arousal, "
+            "dysfunctional beliefs about sleep, time in bed extension, napping, caffeine). "
+            "CBT-I components (NICE/APA/Sleep Society first-line — superior to hypnotics): "
+            "(1) Sleep Restriction Therapy: limit TIB to actual sleep time + 30 min. "
+            "Never <5 hours. Builds sleep pressure. Titrate up 15–30 min when SE >85%. "
+            "(2) Stimulus Control: bed/bedroom for sleep + sex only. "
+            "Get up after 20 min if not asleep. Fixed wake time 7 days/week. "
+            "(3) Relaxation: PMR, mindfulness, imagery — for hyperarousal. "
+            "(4) Cognitive Restructuring: 'I need 8 hours', 'I cannot function without sleep', "
+            "'I have lost control of sleep' → evidence-based alternatives. "
+            "(5) Sleep Hygiene: weakest standalone component but important adjunct — "
+            "consistent schedule, dark/cool room, no screens/alcohol/caffeine ≥2h before bed, exercise. "
+            "ISI ≥15 = moderate-severe insomnia → initiate CBT-I. "
+            "Digital CBT-I (Sleepio, Somryst): comparable efficacy to face-to-face."
+        ),
+    },
+    {
+        "id": "sl_002", "category": "sleep",
+        "title": "Sleep Apnea, Circadian Disorders, Narcolepsy, and CBSD",
+        "content": (
+            "Obstructive Sleep Apnea (OSA): repeated upper airway collapse causing "
+            "oxygen desaturation + arousal. Symptoms: loud snoring, witnessed apneas, "
+            "morning headache, excessive daytime sleepiness (EDS), nocturia, dry mouth. "
+            "Epworth Sleepiness Scale ≥10 = significant EDS → refer for polysomnography. "
+            "OSA is highly comorbid with depression, anxiety, and cognitive impairment — "
+            "MUST be ruled out before attributing symptoms to primary psychiatric disorders. "
+            "CPAP therapy often resolves associated psychiatric symptoms. "
+            "Narcolepsy: EDS + cataplexy (sudden bilateral muscle weakness triggered by "
+            "emotion, especially laughter). Hypnagogic/hypnopompic hallucinations, sleep paralysis. "
+            "Often misdiagnosed as depression or epilepsy for years. "
+            "Multiple Sleep Latency Test (MSLT): mean sleep onset <8 min + ≥2 SOREMPs. "
+            "Treatment: sodium oxybate (gold standard), modafinil, methylphenidate for EDS. "
+            "Circadian Rhythm Sleep-Wake Disorders: "
+            "DSWPD (Delayed Sleep Phase — night owls): light therapy in morning + melatonin at dusk; "
+            "common in adolescents → major cause of school non-attendance. "
+            "ASWPD (Advanced Sleep Phase — early morning waking): evening light therapy. "
+            "Shift Work Disorder: melatonin + light exposure management + hypnotics short-term. "
+            "REM Sleep Behavior Disorder (RBD): acting out dreams physically — "
+            "early marker for Parkinson's/Lewy Body Dementia. Clonazepam or melatonin."
+        ),
+    },
+
+    # ──────────────────────────────────────────────────────────────
+    # SECTION 12 ▸ SEXUAL, GENDER, AND REPRODUCTIVE  (docs sg_001–sg_002)
+    # ──────────────────────────────────────────────────────────────
+    {
+        "id": "sg_001", "category": "sexual_dysfunction",
+        "title": "Sexual Dysfunctions: Types, Assessment, and Treatment",
+        "content": (
+            "Sexual Dysfunctions DSM-5: clinically significant disturbance in sexual response "
+            "or experience of sexual pleasure, causing significant distress, ≥6 months. "
+            "In people assigned female at birth: "
+            "Female Sexual Interest/Arousal Disorder (FSIAD): reduced/absent sexual interest, "
+            "arousal, genital sensations. Female Orgasmic Disorder: delay/absence of orgasm. "
+            "Genito-Pelvic Pain/Penetration Disorder (GPPPD — replaces vaginismus/dyspareunia): "
+            "difficulty with penetration, pain, fear/anxiety, pelvic floor tension. "
+            "In people assigned male at birth: "
+            "Male Hypoactive Sexual Desire Disorder, Erectile Disorder, "
+            "Delayed/Absent Ejaculation, Premature (Early) Ejaculation. "
+            "Assessment: sexual history, relationship quality, medical history (diabetes, "
+            "cardiovascular, neurological, medications — antidepressants are major cause), "
+            "trauma history, body image. "
+            "Biopsychosocial model: biological factors (hormonal, vascular, neurological) + "
+            "psychological (performance anxiety, depression, body image, trauma) + "
+            "interpersonal (relationship quality, communication, partner factors). "
+            "Treatment: psychoeducation, Sensate Focus exercises (Masters & Johnson), "
+            "CBT for sexual performance anxiety, mindfulness-based sex therapy (Brotto), "
+            "pelvic floor physiotherapy for GPPPD. "
+            "SSRIs → sexual dysfunction (delayed ejaculation, anorgasmia) → "
+            "switch to bupropion, mirtazapine, or add sildenafil/buspirone augmentation."
+        ),
+    },
+    {
+        "id": "sg_002", "category": "gender",
+        "title": "Gender Dysphoria, Gender Incongruence, and LGBTQ+ Mental Health",
+        "content": (
+            "Gender Dysphoria (DSM-5): marked incongruence between experienced/expressed gender "
+            "and assigned gender, for ≥6 months, causing significant distress/impairment. "
+            "ICD-11 re-categorized as Gender Incongruence under sexual health "
+            "(de-pathologized — no longer a mental disorder). "
+            "Prevalence: 0.5–1.3% global. Transgender and gender diverse (TGD) people "
+            "experience significantly elevated mental health burdens due to social stigma, "
+            "discrimination, violence, family rejection, and minority stress. "
+            "Minority Stress Model (Meyer): distal stressors (discrimination, victimization, "
+            "legal barriers) + proximal stressors (internalized transphobia, concealment, "
+            "rejection expectations) → depression, anxiety, PTSD, suicidality. "
+            "Suicide risk: TGD individuals have 3–4× higher attempt rates vs cisgender peers; "
+            "family rejection is strongest risk factor; family acceptance is strongest protective factor. "
+            "Gender-affirming care (WPATH Standards of Care v8): social affirmation, "
+            "hormone therapy, surgical options — reduces psychological distress significantly. "
+            "Therapeutic stance: fully affirming — gender identity and expression are not "
+            "pathological and not subject to change attempts. "
+            "Conversion practices: cause severe, lasting psychological harm. "
+            "India context: Transgender Persons (Protection of Rights) Act 2019 provides "
+            "legal recognition; implementation is uneven. "
+            "AI flag: any identity-related distress → affirming, validate identity, connect "
+            "to LGBTQ+-affirming services. Never question or challenge gender identity."
+        ),
+    },
+
+    # ──────────────────────────────────────────────────────────────
+    # SECTION 13 ▸ IMPULSE CONTROL & SOMATIC  (docs ic_001–ic_002)
+    # ──────────────────────────────────────────────────────────────
+    {
+        "id": "ic_001", "category": "impulse_control",
+        "title": "Impulse Control, Conduct, and Disruptive Behavior Disorders",
+        "content": (
+            "Intermittent Explosive Disorder (IED): recurrent behavioral outbursts of "
+            "verbal/physical aggression grossly disproportionate to provocation. "
+            "Impulsive (not premeditated), not for tangible gain. Ages ≥6 years. "
+            "High comorbidity with mood/anxiety disorders and substance use. "
+            "CBT for IED: anger monitoring, cognitive restructuring of anger-provoking "
+            "appraisals, relaxation (applied relaxation), social problem-solving. "
+            "Oppositional Defiant Disorder (ODD): pattern of angry/irritable mood + "
+            "argumentative/defiant behavior + vindictiveness ≥6 months. "
+            "Conduct Disorder: persistent violation of rights of others/social norms — "
+            "aggression to people/animals, destruction of property, deceitfulness, theft, "
+            "serious rule violations. Limited prosocial emotions specifier (callous-unemotional "
+            "traits) indicates more severe trajectory. "
+            "Parent-management training (PMT) is first-line for ODD/CD in children. "
+            "Antisocial Personality Disorder: adult continuation of CD; pervasive disregard "
+            "for rights of others. "
+            "Pyromania: deliberate and purposeful fire-setting on multiple occasions, "
+            "tension before + pleasure/gratification/relief after. "
+            "Kleptomania: recurrent failure to resist urges to steal objects not needed. "
+            "SRT (Systematic Reinforcement Therapy), HRT, and covert sensitization used. "
+            "All impulse control presentations: assess trauma history, ADHD, mood disorders, "
+            "substance use as common comorbidities."
+        ),
+    },
+    {
+        "id": "ic_002", "category": "somatic",
+        "title": "Somatic Symptom Disorders and Medically Unexplained Symptoms",
+        "content": (
+            "Somatic Symptom Disorder (SSD) DSM-5: ≥1 distressing somatic symptom "
+            "+ excessive thoughts (severity), feelings (anxiety), or behaviors (time/energy) "
+            "related to the symptom, ≥6 months. "
+            "NOT about 'medically unexplained' — SSD can co-exist with genuine medical illness. "
+            "Key: the disproportionate suffering and impairment, not lack of medical explanation. "
+            "Illness Anxiety Disorder: high health anxiety, minimal/no somatic symptoms. "
+            "Preoccupation with having/acquiring serious illness. "
+            "Functional Neurological Symptom Disorder (Conversion): neurological symptoms "
+            "(weakness, paralysis, non-epileptic seizures, blindness) inconsistent with "
+            "recognized neurological disease. Positive signs: Hoover's sign, tremor entrainment. "
+            "Requires neurological clearance + collaborative biopsychosocial explanation. "
+            "Factitious Disorder: falsification of medical/psychological symptoms in self "
+            "(Munchausen's) or others (Munchausen by proxy/FDI). "
+            "Never dismiss somatic complaints as 'just psychological' without thorough medical "
+            "evaluation — iatrogenic harm from under-investigation is common. "
+            "CBT for somatic disorders: psychoeducation (biopsychosocial model), "
+            "attention retraining (away from body), activity pacing, "
+            "reduction of safety behaviors (reassurance, avoidance, checking). "
+            "Graded Exercise Therapy (GET) for chronic fatigue syndrome (ME/CFS) — "
+            "evidence is contested; paced activity management preferred."
+        ),
+    },
+
+    # ──────────────────────────────────────────────────────────────
+    # SECTION 14 ▸ PSYCHOPHARMACOLOGY  (docs ph_001–ph_003)
+    # ──────────────────────────────────────────────────────────────
+    {
+        "id": "ph_001", "category": "psychopharmacology",
+        "title": "Antidepressants: SSRIs, SNRIs, and Clinical Prescribing",
+        "content": (
+            "SSRIs — First-line for depression, all anxiety disorders, OCD, PTSD, BN. "
+            "Agents: sertraline, escitalopram (best efficacy+tolerability profile, "
+            "Cipriani et al. 2018 Lancet network meta-analysis), fluoxetine (longest half-life, "
+            "safest in overdose, best in pregnancy), paroxetine (highest discontinuation risk), "
+            "citalopram (QTc concern at high doses), fluvoxamine (OCD, social anxiety). "
+            "Onset: symptom improvement 2–4 weeks; full effect 6–8 weeks. "
+            "Minimum adequate trial: 6 weeks at therapeutic dose before changing. "
+            "Common side effects: initial nausea (give with food), sexual dysfunction "
+            "(50–80% — switch to bupropion, mirtazapine, or add sildenafil), insomnia/sedation, "
+            "weight gain with paroxetine, discontinuation syndrome (dizziness, electric shocks, "
+            "flu-like — taper over ≥4 weeks). "
+            "Black box warning (FDA/CDSCO): increased suicidal ideation in <25 years "
+            "in first 2 weeks — monitor closely, does NOT outweigh benefit in most. "
+            "SNRIs (venlafaxine, duloxetine): additionally indicated for chronic pain, "
+            "neuropathy. Dose-dependent NE effects — hypertension at higher doses. "
+            "Mirtazapine: sedating, weight-gaining, useful for insomnia + anorexia variant. "
+            "Bupropion: activating, weight-neutral, smoking cessation, sexual function neutral. "
+            "MAOIs: reserved for TRD — strict dietary tyramine restriction; "
+            "never combine with SSRIs/SNRIs (serotonin syndrome). "
+            "AI role: medication adherence psychoeducation only. Never adjust or prescribe."
+        ),
+    },
+    {
+        "id": "ph_002", "category": "psychopharmacology",
+        "title": "Antipsychotics, Mood Stabilizers, and Anxiolytics",
+        "content": (
+            "Atypical Antipsychotics (SGAs): quetiapine, olanzapine, risperidone, "
+            "aripiprazole, clozapine, lurasidone, paliperidone. "
+            "Indications: schizophrenia, bipolar mania, TRD augmentation, "
+            "severe agitation, BPD affective crises. "
+            "Metabolic monitoring essential: weight, BMI, waist circumference, fasting glucose, "
+            "lipid profile, blood pressure at baseline and every 3 months. "
+            "EPS (extrapyramidal side effects): akathisia (inner restlessness — "
+            "often misdiagnosed as anxiety/agitation), dystonia, Parkinsonism, tardive dyskinesia. "
+            "Clozapine (treatment-resistant schizophrenia only): requires CPMS monitoring. "
+            "Agranulocytosis risk — weekly WBC first 18 weeks, then fortnightly. "
+            "Mood Stabilizers: Lithium (narrow therapeutic index 0.6–1.0 mEq/L; "
+            "toxicity: coarse tremor, confusion, ataxia, vomiting → STOP and rehydrate; "
+            "monitor TFTs, renal every 6 months). "
+            "Valproate: ABSOLUTELY contraindicated in women of childbearing age without PREVENT. "
+            "10% major congenital malformation risk; 30–40% neurodevelopmental harm. "
+            "Lamotrigine (bipolar depression, TRD): titrate SLOWLY — Stevens-Johnson syndrome "
+            "risk with rapid titration. "
+            "Benzodiazepines: short-term anxiety/crisis only (max 2–4 weeks); "
+            "high dependence/tolerance; never for PTSD (impairs fear extinction); "
+            "respiratory depression with alcohol/opioids."
+        ),
+    },
+    {
+        "id": "ph_003", "category": "psychopharmacology",
+        "title": "Neurobiology of Mental Health: Brain Mechanisms",
+        "content": (
+            "Depression neurobiology: monoamine hypothesis (reduced serotonin, norepinephrine, "
+            "dopamine) is incomplete — HPA axis hyperactivation (elevated cortisol), "
+            "hippocampal neurogenesis impairment, inflammatory cytokines (IL-6, TNF-α), "
+            "glutamate/GABA dysregulation, default mode network hyperconnectivity (rumination). "
+            "Stress response: HPA axis activation → CRH → ACTH → cortisol. "
+            "Chronic stress → hippocampal volume reduction (reversible with treatment), "
+            "PFC thinning, amygdala hyperreactivity. "
+            "Anxiety neurobiology: amygdala fear conditioning, "
+            "poor PFC top-down regulation of amygdala, "
+            "locus coeruleus norepinephrine dysregulation. "
+            "PTSD: fear conditioning + failure of extinction, "
+            "hippocampal memory integration failure (trauma not filed as past), "
+            "elevated norepinephrine and CRH. "
+            "Schizophrenia: dopamine hypothesis (mesolimbic excess → positive symptoms, "
+            "mesocortical deficit → negative symptoms); glutamate NMDA receptor hypofunction; "
+            "structural brain changes (enlarged ventricles, grey matter reduction). "
+            "Neuroplasticity principle: effective treatments (CBT, medication, exercise) "
+            "all increase BDNF (Brain-Derived Neurotrophic Factor) — "
+            "promotes hippocampal neurogenesis and synaptic plasticity. "
+            "Exercise: 150 min/week aerobic exercise = antidepressant effect (effect size 0.8); "
+            "first-line recommendation alongside psychological treatment."
+        ),
+    },
+
+    # ──────────────────────────────────────────────────────────────
+    # SECTION 15 ▸ ESCALATION & SAFETY PROTOCOLS  (docs es_001–es_006)
+    # ──────────────────────────────────────────────────────────────
+    {
+        "id": "es_001", "category": "crisis",
+        "title": "Suicide Risk Stratification: Low / Moderate / High / Imminent",
+        "content": (
+            "Risk stratification — clinical decision guide for level of care: "
+            "LOW RISK: Passive ideation only ('I wish I were dead'), no plan, no intent, "
+            "no previous attempts, strong protective factors (family, spirituality, future plans). "
+            "Action: safety plan, increase contact frequency, means restriction advice, "
+            "next appointment <1 week. "
+            "MODERATE RISK: Active ideation with method OR previous history of attempts, "
+            "moderate hopelessness, some protective factors present. "
+            "Action: urgent mental health assessment same/next day, intensive outpatient, "
+            "safety plan + means restriction, emergency contact notification (with consent). "
+            "HIGH RISK: Active ideation + method + plan, OR high-lethality plan, "
+            "recent attempt, severe hopelessness, poor impulse control, substance intoxication, "
+            "few/no protective factors. "
+            "Action: emergency psychiatric evaluation today, consider voluntary admission, "
+            "do not leave alone, emergency contact notification. "
+            "IMMINENT RISK: Active attempt in progress, means acquired and stated intent "
+            "to act immediately, or during/immediately after an attempt. "
+            "Action: Emergency services immediately (112 India). "
+            "AI system triggers: "
+            "Explicit suicidal language → minimum HIGH RISK protocol. "
+            "Passive ideation in high-vulnerability context → MODERATE. "
+            "P(Depression) > 0.65 + flagged entropy → escalate to MODERATE minimum. "
+            "AI must STOP CBT and provide crisis resources at HIGH or IMMINENT risk."
+        ),
+    },
+    {
+        "id": "es_002", "category": "crisis",
+        "title": "C-SSRS Protocol and Suicide Assessment Questions",
+        "content": (
+            "Screening C-SSRS questions (ask when any concern): "
+            "Q1: 'Have you wished you were dead or wished you could go to sleep and not wake up?' "
+            "Q2: 'Have you actually had any thoughts of killing yourself?' "
+            "Any 'yes' → proceed to full ideation and behavior subscales. "
+            "Full Ideation subscale (5 levels — see assessment section at_003). "
+            "Behavior subscale questions: "
+            "'Have you done anything to prepare for ending your life?' "
+            "'Have you started to do something to kill yourself but stopped before actually "
+            "doing it?' "
+            "'Has anyone stopped you from completing a suicide attempt?' "
+            "'Have you made a suicide attempt?' "
+            "Intensity probes (for any active ideation): "
+            "Frequency: 'How often do you have these thoughts?' "
+            "Duration: 'How long do they last?' "
+            "Controllability: 'Can you put them aside?' "
+            "Deterrents: 'What stops you?' "
+            "Reasons: 'Why do you want to die?' "
+            "Document verbatim: use patient's own words in quotation marks. "
+            "Time frame for intent assessment: 'Are you thinking of acting on these thoughts "
+            "now? Today? In the near future?' "
+            "After any disclosure: 'Thank you for telling me. I want to make sure you're safe.' "
+            "Always assess means: 'Do you have access to [stated means]? Is it at home?' "
+            "AI system: provide these questions; escalate all concerning answers to human."
+        ),
+    },
+    {
+        "id": "es_003", "category": "crisis",
+        "title": "Safety Planning, Means Restriction, and NSSI Management",
+        "content": (
+            "Stanley-Brown Safety Planning Intervention (SPI) — 6 ordered steps: "
+            "(1) Personal warning signs: what thoughts, feelings, images, situations "
+            "or behaviors indicate a crisis is developing? "
+            "(2) Internal coping strategies: what can I do alone to distract/soothe? "
+            "(activities, sensory, movement). "
+            "(3) Social distractors: people and places that reduce distress without "
+            "discussing the crisis. "
+            "(4) People to contact for help: specific names + numbers. "
+            "(5) Professionals and crisis lines: clinician, psychiatrist, crisis line "
+            "(Vandrevala 1860-2662-345; iCall 9152987821). "
+            "(6) Means restriction: how to make the environment safer. "
+            "Means restriction evidence: 70% reduction in means-specific suicide rates "
+            "when access is reduced (coal gas, paracetamol pack limits). "
+            "For medications: dispense limited quantities; family member holds bottles. "
+            "For firearms: store at different location; use gun lock. "
+            "Safety plan: written collaboratively; photographed on phone; "
+            "reviewed at every contact. NOT a no-suicide contract — ineffective and harmful. "
+            "NSSI assessment: method, frequency, tissue damage severity, function (see fw_004), "
+            "suicidal intent (explicitly and separately), triggers, means access. "
+            "NSSI replacement strategies: hold ice, snap elastic band, draw on skin, "
+            "intense exercise — same sensory function without tissue damage."
+        ),
+    },
+    {
+        "id": "es_004", "category": "crisis",
+        "title": "Crisis Intervention, Involuntary Admission, and Stepped Care",
+        "content": (
+            "Crisis intervention model (Roberts' 7-stage): "
+            "1. Assess lethality/safety. 2. Establish rapport. 3. Identify major problems. "
+            "4. Explore emotions. 5. Generate/explore alternatives. 6. Action plan. 7. Follow-up. "
+            "Stepped Care Model for Mental Health: "
+            "Step 1: Recognition, psychoeducation, self-help resources, monitoring. "
+            "Step 2: Guided self-help, digital CBT, brief intervention (3–6 sessions). "
+            "Step 3: High-intensity psychological therapy (12–20 sessions) ± medication. "
+            "Step 4: Complex/specialist — personality disorders, dual diagnosis, psychosis. "
+            "Step 5: Inpatient / crisis team / intensive community support. "
+            "Voluntary admission: always first option when inpatient care is indicated. "
+            "Involuntary admission criteria (India — Mental Healthcare Act 2017): "
+            "Person has mental illness AND is at serious risk of harm to self or others "
+            "AND lacks capacity to make informed treatment decisions. "
+            "Requires assessment by MBBS doctor AND psychiatrist (Board). "
+            "Nearest relative/nominated representative notified within 24 hours. "
+            "Duration: initial 30 days; renewable. Mental Health Review Board oversight. "
+            "Emergency admission (Section 94, MHA 2017): police officer or magistrate "
+            "may admit for assessment in emergency without warrant. "
+            "AI role: recommend emergency services + crisis lines; cannot authorize any admission."
+        ),
+    },
+    {
+        "id": "es_005", "category": "crisis",
+        "title": "India Crisis Resources: Complete Directory",
+        "content": (
+            "EMERGENCY: 112 (police/ambulance combined), 102 (ambulance), 108 (EMRI). "
+            "NATIONAL MENTAL HEALTH CRISIS LINES: "
+            "Tele-MANAS: 14416 — Government of India, 24/7, free, multilingual (20 languages), "
+            "launched October 2022 under National Mental Health Programme (NMHP). "
+            "Vandrevala Foundation: 1860-2662-345 — 24/7, 12 Indian languages. "
+            "WhatsApp: +91-9999-666-555. "
+            "iCall (TISS Mumbai): 9152987821 — Mon–Sat 8am–10pm, English/Hindi/Marathi. "
+            "AASRA: 9820466627 — suicide prevention, 24/7, Mumbai-based. "
+            "Fortis Stress Helpline: 8376804102 — 24/7. "
+            "STATE/REGIONAL: "
+            "Snehi Chennai: 044-24640050 — emotional support. "
+            "iCare Tamil Nadu: 044-24601234. "
+            "NIMHANS Bangalore: 080-46110007. "
+            "KIRAN (Ministry of Social Justice): 1800-599-0019 — free, 24/7, 13 languages. "
+            "CHILD/ADOLESCENT: "
+            "Childline: 1098 — 24/7, child protection and crisis. "
+            "iCall also handles adolescent cases. "
+            "GENDER-BASED VIOLENCE: "
+            "National Women Helpline: 181. "
+            "Police Women's Cell: 100. "
+            "LGBTQ+ support: Humsafar Trust (Mumbai): 022-26673800. "
+            "QLife India: queerlife.in for LGBTQ+ crisis support. "
+            "AI system: display relevant lines based on risk level and patient demographics."
+        ),
+    },
+    {
+        "id": "es_006", "category": "crisis",
+        "title": "Homicidal Ideation, Risk to Others, and Duty to Protect",
+        "content": (
+            "Homicidal Ideation (HI): thoughts of harming, injuring, or killing another person. "
+            "Assessment mirrors suicide risk: "
+            "Passive HI: wishes harm would befall another without active plan. "
+            "Active HI without plan: active thoughts of killing but no specific plan. "
+            "Active HI with plan: identified victim + method + means access = HIGH RISK. "
+            "Active HI with intent: stated intention to act = IMMINENT RISK. "
+            "Clinical indicators of higher risk: identified specific target, access to means, "
+            "history of violence, command hallucinations to harm, substance intoxication, "
+            "paranoid delusions about the identified target, impulsivity. "
+            "Duty to Protect (Tarasoff principle): if a patient makes a credible, specific "
+            "threat to an identifiable third party, the clinician has a duty to take reasonable "
+            "steps to protect that person — warning the potential victim, alerting law enforcement, "
+            "or both. Confidentiality is overridden in this circumstance. "
+            "India legal context: no statutory Tarasoff equivalent but clinical ethics and "
+            "duty of care principles apply; Indian Medical Council guidelines support disclosure "
+            "to prevent serious harm. "
+            "HI in context of psychosis: immediate psychiatric emergency; antipsychotic treatment. "
+            "HI in context of domestic violence: safety planning for victim; legal resources. "
+            "AI system: any homicidal content in transcript → human clinician immediately + "
+            "emergency services if imminent; document verbatim."
+        ),
+    },
+
+    # ──────────────────────────────────────────────────────────────
+    # SECTION 16 ▸ SPECIAL POPULATIONS  (docs sp_001–sp_008)
+    # ──────────────────────────────────────────────────────────────
+    {
+        "id": "sp_001", "category": "adolescents",
+        "title": "Adolescent Mental Health: Assessment and Treatment Adaptations",
+        "content": (
+            "Adolescence (10–24 years): peak onset for 75% of adult mental health disorders. "
+            "PFC maturation continues to age 25 — risk-taking, impulsivity, emotional "
+            "volatility are normative but amplify psychopathology. "
+            "Developmental tasks: identity formation, autonomy, peer affiliation, "
+            "romantic relationships, academic achievement — each a potential stressor. "
+            "Assessment tools: PHQ-A (depression), SCARED (anxiety), PCL-5 adolescent "
+            "version, CRAFFT (substance use screening for <21), Columbia Pediatric C-SSRS. "
+            "Unique risk factors: bullying (including cyberbullying), social media exposure, "
+            "academic pressure (India: board exams, competitive entrance exams), "
+            "family conflict, sexual abuse, LGBTQ+ identity development. "
+            "Adapted CBT for adolescents: shorter sessions (45 min), concrete exercises, "
+            "behavioral focus, active parent involvement (psychoeducation + reducing "
+            "accommodation), involving school when appropriate. "
+            "DBT-A (adolescent DBT): modified for younger patients; includes family skills training. "
+            "Self-harm: prevalence ~17% adolescents. Usually NOT suicidal — assess function. "
+            "School refusal: graded return protocol, address underlying anxiety. "
+            "Mandatory reporting (India — POCSO Act 2012): all professionals are mandated "
+            "reporters of child sexual abuse. Must report to Special Juvenile Police Unit. "
+            "AI flag: any under-18 patient → recommend human clinician; "
+            "do not proceed with autonomous CBT module."
+        ),
+    },
+    {
+        "id": "sp_002", "category": "elderly",
+        "title": "Geriatric Mental Health: Late-Life Depression, Anxiety, and Cognition",
+        "content": (
+            "Depression in elderly is underdiagnosed — atypical presentation: "
+            "somatic complaints (pain, fatigue, GI symptoms), memory concerns, "
+            "anxiety symptoms rather than sadness, withdrawal, and apathy. "
+            "GDS-15 (Geriatric Depression Scale): validated for elderly; avoids somatic items. "
+            "Late-onset depression (first episode >60): stronger vascular and neurological "
+            "correlates — always screen cognition (MoCA) + review medications. "
+            "Vascular depression: subcortical white matter changes, psychomotor slowing, "
+            "executive dysfunction, less family history. "
+            "Complicated bereavement: multiple losses, widowhood, loss of role, independence. "
+            "Anxiety in elderly: often comorbid with depression and medical illness. "
+            "GAD most common anxiety disorder in older adults. Late-onset panic uncommon — "
+            "always rule out cardiac, respiratory causes. "
+            "Pharmacological considerations: START low, GO slow. "
+            "Increased sensitivity to sedative side effects. Anticholinergic burden "
+            "(TCAs, paroxetine) → confusion, falls. "
+            "SSRI-induced hyponatraemia risk. Monitor falls risk — venlafaxine, mirtazapine, "
+            "sertraline preferred. "
+            "CBT for elderly: slower pace, more repetition, written summaries, "
+            "life review (addressing death anxiety, meaning-making). "
+            "Caregiver mental health: 50% of dementia caregivers develop depression. "
+            "Assess and support carers at every contact."
+        ),
+    },
+    {
+        "id": "sp_003", "category": "perinatal",
+        "title": "Perinatal Mental Health: Antenatal, Postnatal, and Psychosis",
+        "content": (
+            "Perinatal period: conception to 1 year postpartum. "
+            "10–15% develop postnatal depression; 10% antenatal depression; "
+            "anxiety even more common (15–20% perinatal). "
+            "EPDS: screen at first antenatal visit, 28 weeks, 6 weeks postnatal, 12 weeks postnatal. "
+            "Cutoff ≥13 (≥10 for initial screen). Item 10 → immediate safety assessment. "
+            "Baby blues (3–5 days): normal; resolves spontaneously. Psychoeducation only. "
+            "Postpartum Psychosis (1–2/1000): psychiatric emergency. "
+            "Acute onset within 2 weeks of delivery — rapid cycling affective psychosis, "
+            "confusion, mania-like features. "
+            "High risk: previous postpartum psychosis (50% recurrence), bipolar disorder, "
+            "family history. "
+            "IMMEDIATE inpatient admission (Mother and Baby Unit if available) — "
+            "infanticide and suicide risk. Partner must be alert. "
+            "Infant attachment: untreated perinatal mental health → impaired mother-infant "
+            "bonding → long-term child developmental consequences. "
+            "Treatment priorities: IPT and CBT preferred (avoid medication where possible "
+            "in breastfeeding but not at expense of effective treatment). "
+            "Sertraline and paroxetine have relatively low breast milk transfer. "
+            "Always involve obstetrician in all medication decisions. "
+            "Partner screening: partners have elevated risk — Edinburgh Partner Depression Scale. "
+            "India context: stigma of maternal mental illness is extreme — "
+            "normalize perinatal distress; involve family with consent."
+        ),
+    },
+    {
+        "id": "sp_004", "category": "cultural",
+        "title": "Cultural Formulation Interview and Indian Clinical Context",
+        "content": (
+            "DSM-5 Cultural Formulation Interview (CFI): 16-question structured tool — "
+            "Cultural definition of problem, Cultural perceptions of cause, Cultural factors "
+            "in help-seeking, Cultural factors in relationship with clinician. "
+            "Indian-specific cultural considerations: "
+            "(1) Somatization: depression and anxiety frequently present as physical complaints "
+            "— 'dil ghabrana' (heart sinking), 'sir mein dard' (head pain), 'weakness' — "
+            "particularly in women and rural settings. Never dismiss somatic complaints. "
+            "(2) Collectivist family system: decisions are family, not individual. "
+            "Involve family with consent — family can be both protective factor AND stressor. "
+            "Marriage pressure, honor, shame, caste identity — integral to formulation. "
+            "(3) Stigma and labeling: 'pagal' carries severe social consequences. "
+            "Frame mental health as 'stress', 'tension', 'nerve weakness' for engagement. "
+            "(4) Help-seeking hierarchy: traditional healers, religious figures, general "
+            "practitioners often consulted before mental health specialists. Collaborate, "
+            "do not dismiss spiritual/religious practices. "
+            "(5) Gender dynamics: women's distress minimized or attributed to hormones; "
+                        "men discouraged from emotional expression — depression in men "
+            "often presents as anger, substance use, or physical complaints. "
+            "(6) Caste and socioeconomic determinants: discrimination, poverty, "
+            "Dalit identity, inter-caste conflict — significant social determinants "
+            "of mental health that must be included in formulation, not ignored. "
+            "(7) Academic and career pressure: IIT/NEET competitive exam stress "
+            "is a major precipitant of adolescent mental health crises in India. "
+            "(8) Language: conduct all assessments in patient's primary language — "
+            "validated Hindi, Tamil, Telugu, Bengali, Marathi PHQ-9/GAD-7 exist. "
+            "CFI should be used for all patients whose cultural background differs "
+            "from that of the clinician or when cultural factors appear clinically relevant."
+        ),
+    },
+    {
+        "id": "sp_005", "category": "lgbtq",
+        "title": "LGBTQ+ Mental Health: Minority Stress and Affirming Care",
+        "content": (
+            "Meyer's Minority Stress Model: LGBTQ+ individuals experience unique chronic "
+            "stressors beyond general life stress. "
+            "Distal stressors: discrimination, victimization, rejection, legal barriers. "
+            "Proximal stressors: internalized homophobia/transphobia, concealment of identity, "
+            "vigilance and expectation of rejection. "
+            "Mental health burden: 2–3× higher depression, anxiety, PTSD; "
+            "4× higher suicide attempt rates vs. heterosexual peers. "
+            "Bisexual individuals have HIGHER rates than gay/lesbian — "
+            "biphobia from both heterosexual and gay/lesbian communities. "
+            "India legal context: Section 377 repealed (2018 Navtej Singh Johar judgment) — "
+            "consensual same-sex relations decriminalized. "
+            "Transgender Persons Protection of Rights Act 2019 provides legal recognition. "
+            "However, social, family, and workplace discrimination remains widespread. "
+            "Transgender community particularly vulnerable: violence, exclusion, "
+            "housing insecurity, sex work for survival, extreme mental health burden. "
+            "Therapeutic principles: affirming, not neutral — LGB identities and gender "
+            "diversity are not pathological and not targets for change. "
+            "Conversion practices cause severe lasting psychological harm — contraindicated. "
+            "Coming out risk assessment: assess family, housing, employment safety "
+            "before encouraging disclosure — not all environments are safe. "
+            "AI system: never pathologize identity; never suggest orientation is the problem; "
+            "validate all identity expressions; connect to LGBTQ+-affirming services. "
+            "Resources: iCall TISS (LGBTQ+-affirming), Humsafar Trust Mumbai: 022-26673800, "
+            "QLife India: queerlife.in."
+        ),
+    },
+    {
+        "id": "sp_006", "category": "occupational",
+        "title": "Workplace Mental Health, Burnout, and Occupational Stress",
+        "content": (
+            "WHO ICD-11 recognizes Burnout (QD85) as an occupational phenomenon (not disorder): "
+            "chronic workplace stress not successfully managed. "
+            "Three dimensions (Maslach Burnout Inventory — MBI): "
+            "Emotional Exhaustion (depleted, no energy), "
+            "Depersonalization/Cynicism (detachment, negative attitude toward work), "
+            "Reduced Personal Accomplishment/Efficacy. "
+            "Differentiate burnout from depression: burnout is context-specific "
+            "(resolves during vacation); depression is pervasive across all life domains. "
+            "Burnout predicts and can precipitate clinical depression — screen with PHQ-9. "
+            "High-risk occupations in India: IT sector (deadline pressure, night shifts), "
+            "healthcare workers (50–70% burnout post-COVID), teachers, legal professionals, "
+            "financial sector, gig economy workers. "
+            "Occupational stressors: role conflict, role ambiguity, lack of autonomy, "
+            "poor managerial support, bullying/harassment, job insecurity, overload. "
+            "Individual interventions: CBT for work-related beliefs, boundary-setting, "
+            "stress management, sleep hygiene, physical activity, social support cultivation. "
+            "Organizational interventions: workload reduction, autonomy increase, "
+            "recognition, community building, flexible working — more effective than individual alone. "
+            "Compassion Fatigue: vicarious traumatization in healthcare/caregiving professions. "
+            "Secondary Traumatic Stress Scale (STSS) for assessment. "
+            "Self-care protocols for mental health professionals: supervision, peer support, "
+            "personal therapy, regular clinical debrief. "
+            "AI flag: work-related distress in transcript → psychoeducation + PHQ-9 + "
+            "occupational health / EAP referral recommendation."
+        ),
+    },
+    {
+        "id": "sp_007", "category": "comorbidity",
+        "title": "Mental Health and Chronic Physical Illness",
+        "content": (
+            "Comorbid mental health disorders affect 30–50% of chronic illness patients. "
+            "Bidirectional relationships exist for most chronic conditions. "
+            "Cardiovascular disease: post-MI depression (15–25% prevalence) → 3–4× increased "
+            "cardiac mortality. Anxiety increases arrhythmia risk. "
+            "SSRIs safe in cardiac disease; sertraline preferred post-MI. "
+            "Diabetes: depression prevalence 15–25%; bidirectional — depression worsens "
+            "glycemic control via cortisol, poor adherence; hyperglycemia causes fatigue/mood. "
+            "Cancer: 20–40% prevalence of depression/anxiety; adjustment disorder most common. "
+            "Fear of recurrence, existential distress, body image, sexual dysfunction, "
+            "pain, and treatment side effects all require psychological attention. "
+            "Meaning-Centered Psychotherapy (Breitbart) and dignity therapy for terminal illness. "
+            "Chronic Pain: central sensitization overlaps with depression and PTSD. "
+            "Pain catastrophizing ('This pain will never end, I can't cope') is the key "
+            "CBT target. ACT has strongest evidence for chronic pain — defusion + acceptance. "
+            "HIV/AIDS: 30–50% prevalence of depression; stigma, grief, medication side effects, "
+            "neuropsychiatric HIV. "
+            "Epilepsy: depression 20–30%; suicide risk 5× general population. "
+            "Some antiepileptics (valproate, lamotrigine) have mood-stabilizing properties. "
+            "MS: depression 50%; fatigue; cognitive issues. "
+            "Parkinson's: depression 40%, anxiety 40%, psychosis (medication-induced). "
+            "Rule: Treat mental health and physical health simultaneously — never sequential."
+        ),
+    },
+    {
+        "id": "sp_008", "category": "gender_mental_health",
+        "title": "Gender Differences in Mental Health Presentations",
+        "content": (
+            "Biological sex and gender both influence mental health prevalence, "
+            "presentation, and treatment response. "
+            "Women (assigned female at birth): "
+            "2× higher prevalence of depression and anxiety disorders. "
+            "Hormonal influences: premenstrual dysphoric disorder (PMDD — severe mood "
+            "changes in luteal phase, disrupts functioning; SSRI or oral contraceptive "
+            "treatment), perinatal depression, perimenopause depression (40–55 years — "
+            "often misdiagnosed or undertreated). "
+            "Higher rates of: eating disorders, somatic symptom disorders, "
+            "PTSD (despite lower trauma exposure — higher conditional probability), "
+            "anxiety disorders, borderline PD. "
+            "Higher rates of help-seeking — more likely to be in therapy. "
+            "Trauma: higher rates of sexual trauma, domestic violence, childhood sexual abuse. "
+            "Men (assigned male at birth): "
+            "Higher rates of: substance use disorders, antisocial PD, gambling disorder, "
+            "ADHD, autism, suicide completion (3–4× higher despite fewer attempts). "
+            "Lower help-seeking: male gender role norms (stoicism, self-reliance, "
+            "weakness stigma) reduce disclosure and treatment engagement. "
+            "Masked depression in men: presents as irritability, anger, aggression, "
+            "risk-taking, substance use, work overinvolvement rather than sadness. "
+            "Men need explicit permission to discuss emotional distress. "
+            "India: masculinity norms particularly rigid; peer support models "
+            "(men's groups, male-identified counselors) improve engagement. "
+            "Non-binary and gender diverse: experience elevated mental health burden "
+            "from minority stress — see sp_005."
+        ),
+    },
+
+    # ──────────────────────────────────────────────────────────────
+    # SECTION 17 ▸ POLICY & GUIDELINES  (docs pol_001–pol_004)
+    # ──────────────────────────────────────────────────────────────
+    {
+        "id": "pol_001", "category": "policy",
+        "title": "India Mental Healthcare Act 2017: Complete Summary",
+        "content": (
+            "Mental Healthcare Act (MHCA) 2017 (effective May 2018): landmark legislation "
+            "replacing the Mental Health Act 1987. Aligns India with UNCRPD principles. "
+            "Key rights guaranteed: "
+            "(1) Right to access mental healthcare: government obligated to provide "
+            "affordable, accessible services within reasonable distance. "
+            "(2) Right to equality and non-discrimination: no discrimination in insurance, "
+            "employment, or healthcare based on mental illness. "
+            "(3) Right to dignity: protection from inhuman/degrading treatment; "
+            "no solitary confinement, no physical restraint except as last resort. "
+            "(4) Right to confidentiality: except in emergencies. "
+            "(5) Right to make treatment decisions: capacity presumed; "
+            "advance directives (Advance Directive Document) legally valid. "
+            "(6) Decriminalization of suicide attempt (Section 115): "
+            "person who attempts suicide shall be presumed to have severe stress and "
+            "shall NOT be tried/punished under IPC Section 309 (repealed effectively). "
+            "This is crucial for mental health AI — users must be told their disclosures "
+            "will not result in criminal prosecution. "
+            "(7) Regulation of mental health establishments: mandatory registration. "
+            "(8) Mental Health Review Boards in each state: oversee admissions. "
+            "Nominated Representative: person designated by patient to make decisions "
+            "when patient lacks capacity. "
+            "MHCA 2017 explicitly includes substance use and mental illness together. "
+            "Limitation: implementation uneven across states; rural access remains poor."
+        ),
+    },
+    {
+        "id": "pol_002", "category": "policy",
+        "title": "National Mental Health Programme, DMHP, and Tele-MANAS",
+        "content": (
+            "National Mental Health Programme (NMHP, 1982, revised 2003, 2017): "
+            "India's overarching policy framework. Goals: prevention and treatment of "
+            "mental disorders, rehabilitation, reduction of stigma, integration of "
+            "mental health into primary healthcare. "
+            "District Mental Health Programme (DMHP): implemented in all 779 districts. "
+            "Services: outpatient, inpatient (30-bed), day care, emergency, home visits, "
+            "community outreach, school mental health, IEC (Information/Education/Communication). "
+            "DMHP staffing: psychiatrist, clinical psychologist, psychiatric social worker, "
+            "psychiatric nurse per district. "
+            "Ayushman Bharat Health and Wellness Centres (HWCs): "
+            "integration of basic mental health screening into primary care. "
+            "ASHA and ANM workers trained in mental health first aid. "
+            "Tele-MANAS (Tele Mental Health Assistance and Networking Across States): "
+            "Launched October 2022 by Ministry of Health. Helpline: 14416. "
+            "24/7 service across India; free of cost; 20 Indian languages. "
+            "Four-tier model: call center counselors → clinical psychologists → psychiatrists "
+            "→ physical care/referral. Integrated with NIMHANS. "
+            "National Institute of Mental Health and Neuro Sciences (NIMHANS), Bangalore: "
+            "apex body for mental health in India. "
+            "National Tele-Mental Health Programme: 23 tele-MANAS cells across states. "
+            "AI system alignment: recommend Tele-MANAS as first point of escalation "
+            "for moderate-risk cases who need human support in India."
+        ),
+    },
+    {
+        "id": "pol_003", "category": "policy",
+        "title": "WHO mhGAP Guidelines and NICE Treatment Algorithms",
+        "content": (
+            "WHO mhGAP Intervention Guide (v2.0, 2016; updated 2023): "
+            "evidence-based clinical protocols for mental health in low-resource settings. "
+            "Priority conditions: depression, psychosis, bipolar, epilepsy, ID, "
+            "developmental disorders, behavioral disorders, dementia, "
+            "substance use, self-harm/suicide. "
+            "mhGAP principles: task-sharing (non-specialists deliver mental healthcare "
+            "under supervision), stepped care, integration into general health services. "
+            "mhGAP assessment protocol: Master Chart — "
+            "Step 1: Assess for emergency (imminent self-harm, violence, psychosis). "
+            "Step 2: Assess for priority mental health conditions. "
+            "Step 3: Assess for co-occurring conditions and psychosocial stressors. "
+            "NICE (UK National Institute for Health and Care Excellence) guidelines "
+            "provide gold-standard evidence-based treatment recommendations: "
+            "NG222 Depression in Adults (2022): patient choice between psychological "
+            "and pharmacological treatment for moderate-severe depression. "
+            "CG158 Psychosis and Schizophrenia (2014 updated): CBTp for all, "
+            "family intervention for high Expressed Emotion households. "
+            "NG116 Post-traumatic stress disorder (2018): TF-CBT and EMDR as first-line. "
+            "CG31 OCD (2005 updated): CBT with ERP, SSRIs at higher doses. "
+            "CG113 Generalised anxiety disorder and panic disorder (2011 updated). "
+            "AI system: escalation recommendations should align with mhGAP step levels "
+            "and NICE treatment algorithms."
+        ),
+    },
+    {
+        "id": "pol_004", "category": "policy",
+        "title": "POCSO Act, Domestic Violence Act, and Mandatory Reporting",
+        "content": (
+            "Protection of Children from Sexual Offences (POCSO) Act 2012: "
+            "all professionals (including mental health practitioners and teachers) "
+            "are MANDATED REPORTERS of child sexual abuse. "
+            "Failure to report is a criminal offense (Section 21 POCSO). "
+            "Report to: Special Juvenile Police Unit (SJPU) or local police. "
+            "Mental health practitioners must report regardless of consent — "
+            "child welfare supersedes confidentiality. "
+            "After reporting: child protection investigation proceeds; "
+            "clinician continues therapeutic relationship with child. "
+            "Protection of Women from Domestic Violence Act (PWDVA) 2005: "
+            "defines physical, sexual, emotional, verbal, and economic abuse. "
+            "Women can obtain protection orders, residence orders, and maintenance. "
+            "One Stop Centres (Sakhi Centres) at district level. "
+            "Domestic Violence safety planning for mental health sessions: "
+            "never couple-counsel where domestic violence is occurring — "
+            "increases victim danger. Individual safety planning first. "
+            "National Domestic Violence Helpline: 181 (24/7). "
+            "Juvenile Justice (Care and Protection of Children) Act 2015: "
+            "framework for children in need of care and protection. "
+            "MHCA 2017 Section 23: special provisions for minors in mental health facilities — "
+            "admission only through parent/guardian or CWC (Child Welfare Committee). "
+            "AI system: any disclosure of child abuse, domestic violence, or imminent danger "
+            "to a vulnerable person → mandatory escalation to human clinician."
+        ),
+    },
+
+    # ──────────────────────────────────────────────────────────────
+    # SECTION 18 ▸ CLINICAL ETHICS & AI GOVERNANCE  (docs eth_001–eth_003)
+    # ──────────────────────────────────────────────────────────────
+    {
+        "id": "eth_001", "category": "clinical_ethics",
+        "title": "Clinical Ethics: Consent, Confidentiality, and Boundaries",
+        "content": (
+            "Informed Consent: patient must understand nature/purpose of treatment, "
+            "alternatives available, risks/benefits, right to withdraw at any time "
+            "without consequence. Must be voluntary, competent, and specific. "
+            "Capacity assessment: can the patient understand, retain, weigh, and communicate "
+            "their decision? Capacity is decision-specific and time-specific. "
+            "Best Interests principle: when patient lacks capacity, clinician acts in "
+            "patient's best interests consulting nearest relative/nominated representative. "
+            "Confidentiality: fundamental to therapeutic trust. Limits must be explained "
+            "at first contact: 'Everything stays private except when there is serious risk "
+            "of harm to yourself or others, or a court order.' "
+            "Mandatory breaches: imminent suicide/self-harm, Tarasoff duty to protect "
+            "identifiable third party, child abuse/neglect (POCSO), vulnerable adult abuse. "
+            "Therapeutic boundaries: physical contact (no sexual contact — ever), "
+            "self-disclosure (purposeful, minimal, therapeutic focus), dual relationships "
+            "(avoid — role confusion undermines therapy), gifts (decline or handle carefully), "
+            "outside contact (social media — do not accept friend requests). "
+            "Documentation standards: contemporaneous, factual, objective, dated, signed. "
+            "'If it is not written, it did not happen.' "
+            "Record keeping (India): minimum 3 years under Clinical Establishments Act. "
+            "DPDP Act (Digital Personal Data Protection) India 2023: "
+            "explicit consent required for sensitive health data; "
+            "right to erasure; data minimization; purpose limitation."
+        ),
+    },
+    {
+        "id": "eth_002", "category": "ai_ethics",
+        "title": "AI in Mental Health: Limitations, Bias, and Regulatory Framework",
+        "content": (
+            "AI mental health tools — unique ethical and clinical considerations: "
+            "(1) Diagnostic validity: AI outputs are probabilistic proxies, NOT diagnoses. "
+            "Full clinical diagnosis requires comprehensive interview, longitudinal assessment, "
+            "medical exclusion, and licensed clinician judgment. "
+            "(2) Algorithmic bias: training data biases perpetuate health disparities. "
+            "WEIRD bias (Western, Educated, Industrialized, Rich, Democratic). "
+            "Models may underperform for: rural Indians, non-English speakers, elderly, "
+            "women, lower socioeconomic groups, LGBTQ+ individuals. "
+            "(3) Safety gap: AI cannot assess suicide risk with clinical depth — "
+            "crisis management is a human-only domain. "
+            "(4) Therapeutic alliance: no genuine empathy, no relational repair, "
+            "no body language — the core mechanism of therapy is absent in AI. "
+            "(5) Over-reliance: users may substitute AI for human care, delaying treatment. "
+            "(6) Privacy: mental health data is maximally sensitive. "
+            "Regulatory context: CDSCO (India) regulates AI/ML as medical devices under "
+            "Medical Devices Rules 2017 — diagnostic AI tools may require registration. "
+            "WHO EHTF principles (2021): protect autonomy, promote well-being, "
+            "ensure transparency, foster accountability, ensure equity, promote AI governance. "
+            "Minimum safety standards: disclose AI identity; never diagnose; "
+            "always escalate suicidality to humans; provide safety resources unprompted; "
+            "obtain informed consent; document all interactions; handle data per DPDP Act."
+        ),
+    },
+    {
+        "id": "eth_003", "category": "system_design",
+        "title": "EmoCare AI: Clinical Scope, Position Statement, and Safe Use",
+        "content": (
+            "EmoCare AI is a research-grade affective triage and psychoeducation support tool. "
+            "It is NOT a clinical diagnostic system, NOT a therapeutic chatbot, "
+            "and NOT a replacement for any human mental health service. "
+            "Explicit scope: three-class affective triage (Neutral / Anxiety / Depression) "
+            "using multimodal speech and text signals. "
+            "Validated populations: adults aged 18–65, English and Hindi language input. "
+            "NOT validated for: under-18, over-65, psychosis, bipolar, personality disorders, "
+            "eating disorders, PTSD, OCD, autism, dementia, or any non-adult population "
+            "without supervised clinical oversight. "
+            "System disclosures (mandatory at every session start): "
+            "(1) 'I am an AI, not a human clinician.' "
+            "(2) 'I cannot diagnose any mental health condition.' "
+            "(3) 'This is not a substitute for professional mental health care.' "
+            "(4) 'In an emergency, call 112 or Tele-MANAS 14416 immediately.' "
+            "(5) 'Your conversation data is stored securely per our privacy policy.' "
+            "Contraindications: active suicidal crisis, active psychotic episode, "
+            "active substance intoxication, under-18 without supervising adult, "
+            "forensic/legal purposes, and any clinical decision-making context. "
+            "Escalation triggers: Shannon entropy > 1.2 bits, JSD > 0.15, "
+            "explicit safety content in transcript, PHQ-9 item 9 > 0, "
+            "P(any class) < 0.45. All produce human referral output."
+        ),
+    },
+
+    # ──────────────────────────────────────────────────────────────
+    # SECTION 19 ▸ POSITIVE PSYCHOLOGY & RECOVERY  (docs pp_001–pp_003)
+    # ──────────────────────────────────────────────────────────────
+    {
+        "id": "pp_001", "category": "positive_psychology",
+        "title": "Resilience, Post-Traumatic Growth, and Positive Psychology",
+        "content": (
+            "Resilience: capacity to recover from adversity and adapt positively. "
+            "NOT the absence of distress — resilient individuals feel pain but "
+            "maintain or regain functioning. "
+            "Resilience factors (Masten — ordinary magic): secure attachment, "
+            "self-efficacy, positive self-regard, emotion regulation, problem-solving, "
+            "social connectedness, meaning and purpose, spirituality. "
+            "Interventions to build resilience: CBT skills, social network activation, "
+            "mindfulness, physical health habits, meaning-making. "
+            "Post-Traumatic Growth (PTG, Tedeschi & Calhoun): positive psychological "
+            "transformation from highly challenging life circumstances. "
+            "Five domains: personal strength ('I am more capable than I thought'), "
+            "new possibilities, relating to others (deeper connections), "
+            "appreciation of life, spiritual/existential change. "
+            "PTG coexists with PTSD symptoms — growth does not negate trauma distress. "
+            "Positive Psychology Interventions (PPIs): "
+            "3 Good Things (gratitude): write three positive events + their causes daily "
+            "for 1 week → significant depression reduction (Seligman RCT). "
+            "Character Strengths (VIA Institute): identify top 5 signature strengths + "
+            "deploy in new ways — increases wellbeing (effect size 0.34). "
+            "Savoring: deliberately attending to and appreciating positive experiences. "
+            "Kindness Acts: deliberate prosocial behavior reliably increases wellbeing. "
+            "PERMA model: Positive emotions, Engagement, Relationships, Meaning, Accomplishment. "
+            "PPIs are adjuncts, not replacements — used in recovery phase and relapse prevention."
+        ),
+    },
+    {
+        "id": "pp_002", "category": "relapse_prevention",
+        "title": "Relapse Prevention, Recovery Model, and Self-Management",
+        "content": (
+            "Relapse Prevention (Marlatt & Gordon, originally for substance use — "
+            "extended to depression, anxiety): "
+            "Step 1: Identify high-risk situations (emotional, interpersonal, situational triggers). "
+            "Step 2: Develop coping responses for each high-risk situation. "
+            "Step 3: Lapses vs. relapses: a lapse (single bad day, brief return of symptoms) "
+            "does not equal relapse — 'Abstinence Violation Effect' must be countered "
+            "('One slip doesn't ruin everything'). "
+            "Step 4: Lifestyle rebalancing: daily routines that provide mastery and pleasure. "
+            "Step 5: Early warning signs plan: personal list of first signs + specific actions. "
+            "Recovery Model (Anthony, SAMHSA): "
+            "Recovery is a deeply personal process of changing attitudes, values, feelings, "
+            "goals, skills, and roles. Not the absence of symptoms — a meaningful, satisfying life. "
+            "Recovery principles: hope, person-driven, many pathways, holistic, peer support, "
+            "relational, addresses trauma, culturally based, respectful, strengths-based. "
+            "Wellness Recovery Action Plan (WRAP): peer-developed self-management tool — "
+            "wellness toolbox, daily maintenance plan, triggers, early warning signs, "
+            "crisis plan, post-crisis plan. "
+            "Self-management tools: mood diaries, thought records, activity monitoring, "
+            "sleep logs, PHQ-9/GAD-7 weekly self-monitoring. "
+            "Peer support: lived experience support workers — evidence-based component "
+            "of recovery-oriented services."
+        ),
+    },
+    {
+        "id": "pp_003", "category": "self_compassion",
+        "title": "Self-Compassion, Psychoeducation, and Therapeutic Alliance",
+        "content": (
+            "Self-Compassion (Neff): three components — "
+            "Self-kindness (vs. self-judgment): treating oneself with the warmth "
+            "one would offer a good friend. "
+            "Common humanity (vs. isolation): suffering and personal inadequacy are "
+            "part of the shared human experience. "
+            "Mindfulness (vs. over-identification): balanced awareness of painful thoughts "
+            "without suppression or dramatization. "
+            "Self-compassion predicts better mental health outcomes than self-esteem. "
+            "Unlike self-esteem, it does not require positive self-evaluation — "
+            "available to all, especially in failure. "
+            "Self-compassion break: pause → 'This is a moment of suffering' "
+            "(mindfulness) → 'Suffering is part of life' (common humanity) → "
+            "'May I be kind to myself' (self-kindness). "
+            "Psychoeducation principles: normalize distress; explain the cognitive model "
+            "in simple terms ('Our thoughts affect how we feel'); "
+            "use the patient's own examples; check understanding with teach-back. "
+            "Therapeutic Alliance (Bordin): agreement on goals, agreement on tasks, "
+            "bond quality. Strongest non-specific predictor of therapy outcome (r = 0.28). "
+            "Rupture and repair: alliance ruptures are normal — direct discussion and "
+            "repair predicts BETTER outcomes than no rupture. "
+            "Validation: communicate that the patient's responses are understandable "
+            "given their context — not the same as agreeing with their interpretations. "
+            "Empathy + structure = most effective therapeutic stance."
+        ),
+    },
+
+    # ──────────────────────────────────────────────────────────────
+    # SECTION 20 ▸ SOCIAL DETERMINANTS & DIGITAL HEALTH  (docs sd_001–sd_002)
+    # ──────────────────────────────────────────────────────────────
+    {
+        "id": "sd_001", "category": "social_determinants",
+        "title": "Social Determinants of Mental Health",
+        "content": (
+            "Social determinants of mental health (SDMH): structural conditions in which "
+            "people are born, grow, work, live, and age that shape mental health outcomes. "
+            "Key determinants: "
+            "Poverty: strongest single predictor of mental health burden — "
+            "financial stress, food insecurity, housing instability all independently "
+            "cause and maintain mental illness. "
+            "Education: lower educational attainment associated with higher prevalence; "
+            "education is protective via self-efficacy and social capital. "
+            "Employment: unemployment causes depression; precarious work causes anxiety; "
+            "workplace harassment causes PTSD. "
+            "Housing: homelessness × mental health is bidirectional; overcrowding increases "
+            "stress; domestic violence linked to housing insecurity. "
+            "Social isolation and loneliness: equivalent mortality risk to smoking 15 "
+            "cigarettes/day; independent predictor of depression and cognitive decline. "
+            "Discrimination: racism, casteism, gender discrimination, disability — "
+            "each independently increase mental health risk via chronic stress pathway. "
+            "Adverse Childhood Experiences (ACEs): dose-response relationship — "
+            "higher ACE score → exponentially higher risk of depression, anxiety, "
+            "substance use, and suicide. "
+            "India-specific: rural-urban mental health gap, migrant worker mental health, "
+            "caste-based discrimination as chronic stressor, climate change and farmer distress "
+            "(India farmer suicide rate remains elevated). "
+            "Clinical implication: formulation must include social determinants — "
+            "therapy cannot fully succeed without addressing social context."
+        ),
+    },
+    {
+        "id": "sd_002", "category": "digital_health",
+        "title": "Digital Mental Health, Teletherapy, and Social Media",
+        "content": (
+            "Digital mental health (DMH) encompasses: apps, online CBT programs, "
+            "chatbots, teletherapy, social media mental health content, wearables. "
+            "Evidence-based digital interventions: "
+            "Computerized CBT (cCBT): Beating the Blues, MoodGYM, SilverCloud — "
+            "NICE-recommended for mild-moderate depression and anxiety as Step 2 interventions. "
+            "Sleepio: CBT-I program — comparable efficacy to face-to-face. "
+            "BioBase, Woebot: mental health chatbots with CBT elements — "
+            "some RCT evidence for symptom reduction, not equivalent to human therapy. "
+            "Teletherapy (video/phone CBT): comparable efficacy to face-to-face for most "
+            "disorders except severe presentations requiring in-person assessment. "
+            "Social media and mental health: "
+            "Heavy passive social media use associated with depression, anxiety, "
+            "and FOMO (Fear of Missing Out). "
+            "Instagram/TikTok algorithmic amplification of harmful content — "
+            "eating disorder triggers, suicide method sharing. "
+            "Social media can also provide community and reduce isolation — "
+            "effect depends on use type (active vs. passive) and quality of connections. "
+            "Screen time guidelines: no screens <1 hour for under-2s; "
+            "limit recreational screen time for children/adolescents; "
+            "content quality matters more than quantity for older groups. "
+            "India context: WhatsApp-spread mental health misinformation is widespread — "
+            "health literacy component essential in psychoeducation."
+        ),
+    },
+]
+
+KB_DIR = Path(__file__).parent.parent / "backend" / "knowledge_base"
+KB_DIR.mkdir(parents=True, exist_ok=True)
+
+INDEX_PATH = KB_DIR / "faiss_cbt.index"
+META_PATH = KB_DIR / "cbt_metadata.json"
+EMBED_DIM = 384
+
+
+def build():
+    if not CBT_KNOWLEDGE_BASE:
+        print("❌  CBT_KNOWLEDGE_BASE is empty. Paste your 86 documents first.")
+        sys.exit(1)
+
+    print(f"📚  Building KB with {len(CBT_KNOWLEDGE_BASE)} documents...")
+    embedder = SentenceTransformer("all-MiniLM-L6-v2")
+
+    texts = [f"{d['title']}\n\n{d['content']}" for d in CBT_KNOWLEDGE_BASE]
+    embeddings = embedder.encode(texts, batch_size=32, show_progress_bar=True, normalize_embeddings=True)
+    embeddings = np.array(embeddings, dtype="float32")
+
+    index = faiss.IndexFlatIP(EMBED_DIM)
+    index.add(embeddings)
+    faiss.write_index(index, str(INDEX_PATH))
+
+    metadata = [
+        {"id": d["id"], "category": d["category"], "title": d["title"], "content": d["content"], "text": texts[i]}
+        for i, d in enumerate(CBT_KNOWLEDGE_BASE)
+    ]
+    META_PATH.write_text(json.dumps(metadata, indent=2, ensure_ascii=False))
+
+    print(f"✅  FAISS index: {INDEX_PATH} ({index.ntotal} vectors)")
+    print(f"✅  Metadata:    {META_PATH}")
+
+
+if __name__ == "__main__":
+    build()

@@ -1,0 +1,186 @@
+.auth-root {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  position: relative;
+  overflow: hidden;
+  background: var(--c10);
+}
+
+/* Subtle warm grid on dark background */
+.auth-root::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
+  background-size: 44px 44px;
+  pointer-events: none;
+}
+
+/* Warm glow from top */
+.auth-root::after {
+  content: '';
+  position: fixed;
+  top: -20%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 800px;
+  height: 600px;
+  background: radial-gradient(ellipse,
+    rgba(200,132,74,0.1) 0%,
+    transparent 65%);
+  pointer-events: none;
+}
+
+.auth-grid { display: none; }
+
+.auth-panel {
+  width: 100%;
+  max-width: 420px;
+  position: relative;
+  z-index: 2;
+}
+
+/* Wordmark */
+.auth-wordmark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 28px;
+}
+
+.auth-wordmark-logo {
+  width: 46px; height: 46px;
+  background: rgba(255,255,255,0.07);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 0 20px rgba(200,132,74,0.15);
+}
+
+.auth-wordmark-text {
+  font-family: var(--font-display);
+  font-size: 1.625rem;
+  font-weight: 600;
+  letter-spacing: -0.3px;
+  color: #fff;
+  font-style: italic;
+}
+
+.auth-wordmark-text span {
+  color: var(--c05);
+  font-style: normal;
+  font-weight: 700;
+}
+
+/* Card — sits light on dark background */
+.auth-card {
+  background: var(--c00);
+  border: 1px solid var(--border-2);
+  border-radius: var(--r-4);
+  padding: 36px;
+  box-shadow:
+    0 32px 80px rgba(0,0,0,0.5),
+    0 0 0 1px rgba(255,255,255,0.04);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Top caramel stripe */
+.auth-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--c04), var(--c06), var(--c07));
+}
+
+.auth-card-header { margin-bottom: 26px; }
+
+.auth-card-title {
+  font-family: var(--font-display);
+  font-size: var(--f-2xl);
+  font-weight: 700;
+  letter-spacing: -0.4px;
+  color: var(--text-1);
+  margin-bottom: 5px;
+}
+
+.auth-card-sub {
+  font-size: var(--f-md);
+  color: var(--text-4);
+}
+
+.auth-form { display: flex; flex-direction: column; }
+.auth-field { margin-bottom: 15px; }
+
+/* Consent */
+.auth-consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 13px;
+  background: var(--c02);
+  border: 1px solid var(--border-1);
+  border-radius: var(--r-2);
+  cursor: pointer;
+  margin: 12px 0;
+  transition: all 0.12s;
+}
+
+.auth-consent:hover {
+  border-color: var(--border-a);
+  background: var(--c03);
+}
+
+.auth-consent input {
+  width: 15px; height: 15px;
+  margin-top: 2px;
+  accent-color: var(--c06);
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.auth-consent-text {
+  font-size: var(--f-sm);
+  color: var(--text-4);
+  line-height: 1.55;
+}
+
+.auth-submit { margin-top: 4px; }
+
+/* Footer */
+.auth-card-footer {
+  margin-top: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+
+.auth-link-row {
+  text-align: center;
+  font-size: var(--f-sm);
+  color: var(--text-4);
+}
+
+.auth-link-row a { color: var(--c06); font-weight: 600; }
+.auth-link-row a:hover { color: var(--c07); }
+
+.auth-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 13px;
+  background: rgba(192,120,32,0.06);
+  border: 1px solid rgba(192,120,32,0.16);
+  border-radius: var(--r-2);
+  font-size: var(--f-sm);
+  color: var(--risk-moderate);
+  line-height: 1.5;
+}

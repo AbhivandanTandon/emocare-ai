@@ -1,0 +1,2 @@
+backend/models/text_model/model.safetensors filter=lfs diff=lfs merge=lfs -text
+backend/models/audio_model/wavlm_large_best.pt filter=lfs diff=lfs merge=lfs -text

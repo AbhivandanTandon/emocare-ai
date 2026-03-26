@@ -1,0 +1,86 @@
+/* SHAP panel — c02 warm cream background */
+.shap-root {
+  padding: 16px 24px 20px;
+  background: var(--c02);
+  border-top: 1px solid var(--border-2);
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.shap-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.shap-header-left {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.shap-icon { font-size: 17px; color: var(--c07); margin-top: 1px; flex-shrink: 0; }
+
+.shap-title {
+  font-family: var(--font-display);
+  font-size: var(--f-sm);
+  font-weight: 600;
+  color: var(--text-1);
+  margin-bottom: 2px;
+  font-style: italic;
+}
+
+.shap-sub { font-size: var(--f-sm); color: var(--text-4); }
+
+.shap-legend {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: var(--f-xs);
+  color: var(--text-5);
+}
+
+.shap-legend-item { display: flex; align-items: center; gap: 4px; }
+.shap-legend-swatch { width: 13px; height: 7px; border-radius: 3px; }
+
+/* Gradient uses coffee shades c03→c06 */
+.shap-grad {
+  width: 52px; height: 7px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--c03), var(--c05), var(--c07));
+}
+
+/* Tokens */
+.shap-tokens { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
+
+.shap-token {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 10px 5px;
+  border-radius: var(--r-1);
+  border: 1px solid transparent;
+  cursor: default;
+  transition: transform 0.1s;
+}
+
+.shap-token:hover { transform: translateY(-2px); }
+
+.token-word { font-size: var(--f-sm); font-weight: 500; line-height: 1; font-family: var(--font-body); }
+.token-rank { font-size: 0.57rem; font-family: var(--font-mono); opacity: 0.55; }
+
+/* Bar chart — c00 cards on c02 SHAP bg */
+.shap-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  height: 68px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-1);
+}
+
+.shap-bar-item { display: flex; flex-direction: column; align-items: center; gap: 3px; flex: 1; }
+.shap-bar-fill { width: 100%; min-height: 2px; border-radius: 2px 2px 0 0; }
+.shap-bar-label { font-size: 0.575rem; font-family: var(--font-mono); color: var(--text-5); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; text-align: center; }

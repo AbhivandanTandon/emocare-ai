@@ -1,0 +1,63 @@
+
+> frontend@0.0.0 lint
+> eslint .
+
+
+/Users/abhivandantandon/Desktop/emocare-ai/frontend/src/components/AppointmentCalendar.jsx
+   2:10  error  'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u      no-unused-vars
+  16:61  error  'onUpdate' is defined but never used                                               no-unused-vars
+  16:71  error  'role' is defined but never used                                                   no-unused-vars
+  36:11  error  'd' is assigned a value but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+
+/Users/abhivandantandon/Desktop/emocare-ai/frontend/src/components/AudioRecorder.jsx
+  2:10  error  'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+
+/Users/abhivandantandon/Desktop/emocare-ai/frontend/src/components/BookAppointmentModal.jsx
+  2:27  error  'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+
+/Users/abhivandantandon/Desktop/emocare-ai/frontend/src/components/ConversationList.jsx
+   2:10  error    'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u                                                                no-unused-vars
+  44:6   warning  React Hook useCallback has missing dependencies: 'setSessions' and 'setSessionsLoading'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+
+/Users/abhivandantandon/Desktop/emocare-ai/frontend/src/components/MessageBubble.jsx
+  2:10  error  'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+
+/Users/abhivandantandon/Desktop/emocare-ai/frontend/src/components/ShapHeatmap.jsx
+  2:10  error  'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+
+/Users/abhivandantandon/Desktop/emocare-ai/frontend/src/components/Sidebar.jsx
+  2:10  error  'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+
+/Users/abhivandantandon/Desktop/emocare-ai/frontend/src/pages/AdminDashboard.jsx
+  2:27  error  'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+
+/Users/abhivandantandon/Desktop/emocare-ai/frontend/src/pages/AdminPanel.jsx
+   2:10  error    'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u                                        no-unused-vars
+  30:6   warning  React Hook useEffect has a missing dependency: 'connectWebSocket'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  56:13  error    Empty block statement                                                                                                no-empty
+  72:13  error    Empty block statement                                                                                                no-empty
+
+/Users/abhivandantandon/Desktop/emocare-ai/frontend/src/pages/Chat.jsx
+  2:27  error  'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+
+/Users/abhivandantandon/Desktop/emocare-ai/frontend/src/pages/DoctorDashboard.jsx
+  2:27  error  'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+
+/Users/abhivandantandon/Desktop/emocare-ai/frontend/src/pages/IntakeForm.jsx
+  2:27  error  'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+
+/Users/abhivandantandon/Desktop/emocare-ai/frontend/src/pages/Login.jsx
+  3:10  error  'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+
+/Users/abhivandantandon/Desktop/emocare-ai/frontend/src/pages/Register.jsx
+  3:10  error  'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+
+/Users/abhivandantandon/Desktop/emocare-ai/frontend/src/pages/TherapistDashboard.jsx
+   2:10  error  'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+  41:14  error  'err' is defined but never used                                                no-unused-vars
+
+/Users/abhivandantandon/Desktop/emocare-ai/frontend/src/store/chatStore.js
+  3:42  error  'get' is defined but never used  no-unused-vars
+
+✖ 24 problems (22 errors, 2 warnings)
+

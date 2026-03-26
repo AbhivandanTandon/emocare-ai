@@ -1,0 +1,33 @@
+app/core/config.py:2: error: Cannot find implementation or library stub for module named "pydantic_settings"  [import-not-found]
+app/core/security.py:6: error: Cannot find implementation or library stub for module named "bcrypt"  [import-not-found]
+app/core/security.py:7: error: Cannot find implementation or library stub for module named "cryptography.fernet"  [import-not-found]
+app/core/security.py:8: error: Library stubs not installed for "jose"  [import-untyped]
+app/ml/model_loader.py:8: error: Cannot find implementation or library stub for module named "torch"  [import-not-found]
+app/ml/model_loader.py:9: error: Cannot find implementation or library stub for module named "torch.nn"  [import-not-found]
+app/ml/model_loader.py:10: error: Cannot find implementation or library stub for module named "transformers"  [import-not-found]
+app/core/email.py:3: error: Cannot find implementation or library stub for module named "certifi"  [import-not-found]
+app/core/email.py:4: error: Cannot find implementation or library stub for module named "aiosmtplib"  [import-not-found]
+app/ml/text_inference.py:1: error: Cannot find implementation or library stub for module named "numpy"  [import-not-found]
+app/ml/text_inference.py:2: error: Cannot find implementation or library stub for module named "torch"  [import-not-found]
+app/ml/shap_engine.py:6: error: Cannot find implementation or library stub for module named "numpy"  [import-not-found]
+app/ml/shap_engine.py:7: error: Cannot find implementation or library stub for module named "torch"  [import-not-found]
+app/ml/audio_inference.py:6: error: Cannot find implementation or library stub for module named "librosa"  [import-not-found]
+app/ml/audio_inference.py:7: error: Cannot find implementation or library stub for module named "numpy"  [import-not-found]
+app/ml/audio_inference.py:8: error: Cannot find implementation or library stub for module named "torch"  [import-not-found]
+app/ml/audio_inference.py:21: error: Cannot find implementation or library stub for module named "faster_whisper"  [import-not-found]
+app/ml/audio_inference.py:57: error: Cannot find implementation or library stub for module named "soundfile"  [import-not-found]
+app/websocket/manager.py:13: note: By default the bodies of untyped functions are not checked, consider using --check-untyped-defs  [annotation-unchecked]
+app/websocket/manager.py:15: note: By default the bodies of untyped functions are not checked, consider using --check-untyped-defs  [annotation-unchecked]
+app/ml/fusion.py:17: error: Cannot find implementation or library stub for module named "numpy"  [import-not-found]
+app/ml/fusion.py:19: error: Library stubs not installed for "scipy.stats"  [import-untyped]
+app/ml/fusion.py:19: note: Hint: "python3 -m pip install scipy-stubs"
+app/ml/fusion.py:19: error: Library stubs not installed for "scipy"  [import-untyped]
+app/ml/fusion.py:20: error: Library stubs not installed for "scipy.special"  [import-untyped]
+app/ml/rag.py:6: error: Cannot find implementation or library stub for module named "faiss"  [import-not-found]
+app/ml/rag.py:7: error: Cannot find implementation or library stub for module named "numpy"  [import-not-found]
+app/ml/rag.py:8: error: Cannot find implementation or library stub for module named "sentence_transformers"  [import-not-found]
+app/api/routes/auth.py:8: error: Library stubs not installed for "jose"  [import-untyped]
+app/api/routes/auth.py:8: note: Hint: "python3 -m pip install types-python-jose"
+app/api/routes/auth.py:8: note: (or run "mypy --install-types" to install all missing stub packages)
+app/api/routes/auth.py:8: note: See https://mypy.readthedocs.io/en/stable/running_mypy.html#missing-imports
+Found 26 errors in 10 files (checked 30 source files)
