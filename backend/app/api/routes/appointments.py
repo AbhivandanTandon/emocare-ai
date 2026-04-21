@@ -1,10 +1,9 @@
-import asyncio
 import hashlib
 import uuid
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -42,6 +41,7 @@ class AppointmentUpdate(BaseModel):
 @router.post("")
 async def request_appointment(
     body: AppointmentIn,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -68,34 +68,34 @@ async def request_appointment(
         if dr:
             doctor_name = dr.full_name
 
-    asyncio.create_task(send_appointment_request_email(
+    background_tasks.add_task(send_appointment_request_email,
         to=current_user.email,
         user_name=current_user.full_name,
         doctor_name=doctor_name,
         scheduled_at=scheduled_str,
         notes=body.notes or "",
-    ))
+    )
 
     # Notify Admin
-    asyncio.create_task(send_new_appointment_notification(
+    background_tasks.add_task(send_new_appointment_notification,
         to=settings.MAIL_USERNAME,
         role="admin",
         user_name=current_user.full_name,
         doctor_name=doctor_name,
         scheduled_at=scheduled_str,
         notes=body.notes or "",
-    ))
+    )
 
     # Notify Therapist if selected
     if body.doctor_id and dr:
-        asyncio.create_task(send_new_appointment_notification(
+        background_tasks.add_task(send_new_appointment_notification,
             to=dr.email,
             role="therapist",
             user_name=current_user.full_name,
             doctor_name=doctor_name,
             scheduled_at=scheduled_str,
             notes=body.notes or "",
-        ))
+        )
 
     return {"id": appt.id, "status": "pending"}
 
@@ -195,6 +195,7 @@ async def doctor_appointments(
 async def update_appointment(
     appointment_id: str,
     body: AppointmentUpdate,
+    background_tasks: BackgroundTasks,
     _: User = Depends(require_role("admin")),
     db: AsyncSession = Depends(get_db),
 ):
@@ -236,30 +237,30 @@ async def update_appointment(
             meeting_link = _gmeet_link(appt.id)
             
             # Send to User
-            asyncio.create_task(send_appointment_confirmed_email(
+            background_tasks.add_task(send_appointment_confirmed_email,
                 to=u.email, user_name=u.full_name,
                 doctor_name=doctor_name, scheduled_at=scheduled_str,
                 meeting_link=meeting_link,
-            ))
+            )
             
             # Send to Doctor
             if dr:
-                asyncio.create_task(send_appointment_confirmed_email(
+                background_tasks.add_task(send_appointment_confirmed_email,
                     to=dr.email, user_name=u.full_name,
                     doctor_name=doctor_name, scheduled_at=scheduled_str,
                     meeting_link=meeting_link,
-                ))
+                )
 
         elif body.status == "cancelled":
-            asyncio.create_task(send_appointment_cancelled_email(
+            background_tasks.add_task(send_appointment_cancelled_email,
                 to=u.email, user_name=u.full_name,
                 scheduled_at=scheduled_str, reason=body.cancel_reason or "",
-            ))
+            )
 
         elif body.status == "completed":
-            asyncio.create_task(send_thank_you_email(
+            background_tasks.add_task(send_thank_you_email,
                 to=u.email, user_name=u.full_name
-            ))
+            )
 
     return {"status": appt.status, "id": appt.id}
 
