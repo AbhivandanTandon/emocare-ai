@@ -1,0 +1,4 @@
+--requirement backend/requirements.txt
+
+# This top-level file points to the backend requirements so Render's default
+# build step (`pip install -r requirements.txt`) works from the repository root.
