@@ -5,7 +5,7 @@ import API from '../api/client';
 import { useAuthStore } from '../store/authStore';
 import { useChatStore } from '../store/chatStore';
 import AudioRecorder from '../components/AudioRecorder';
-// import BookAppointmentModal from '../components/BookAppointmentModal';
+import BookAppointmentModal from '../components/BookAppointmentModal';
 import Logo from '../components/Logo';
 import MessageBubble from '../components/MessageBubble';
 import ShapHeatmap from '../components/ShapHeatmap';
@@ -23,7 +23,7 @@ export default function Chat() {
   const [input, setInput]             = useState('');
   const [audioBlob, setAudioBlob]     = useState(null);
   const [showShap, setShowShap]       = useState(false);
-  // const [showBooking, setShowBooking] = useState(false);
+  const [showBooking, setShowBooking] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const textareaRef = useRef(null);
   const bottomRef   = useRef(null);
@@ -151,31 +151,12 @@ export default function Chat() {
               <span className="glow-dot green" />
               Models active
             </div>
-            <div style={{ position: 'relative', display: 'inline-block' }}>
-              <button
-                className="btn btn-secondary btn-sm"
-                disabled
-                // onClick={() => setShowBooking(true)}
-              >
-                Book Appointment
-              </button>
-              <span style={{
-                position: 'absolute',
-                top: '-20px',
-                right: '0',
-                backgroundColor: '#C8844A',
-                color: 'white',
-                padding: '2px 8px',
-                borderRadius: '4px',
-                fontSize: '11px',
-                fontWeight: '600',
-                whiteSpace: 'nowrap',
-                textTransform: 'uppercase',
-                letterSpacing: '0.5px',
-              }}>
-                Coming Soon
-              </span>
-            </div>
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => setShowBooking(true)}
+            >
+              Book Appointment
+            </button>
             <button className="btn btn-secondary btn-sm" onClick={handleNewChat}>
               New chat
             </button>
@@ -325,12 +306,12 @@ export default function Chat() {
 
       </div>
 
-      {/* Booking modal - Coming Soon */}
-      {/* <AnimatePresence>
+      {/* Booking modal */}
+      <AnimatePresence>
         {showBooking && (
           <BookAppointmentModal onClose={() => setShowBooking(false)} />
         )}
-      </AnimatePresence> */}
+      </AnimatePresence>
 
     </div>
   );
