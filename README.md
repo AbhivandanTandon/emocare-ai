@@ -1,3 +1,13 @@
+---
+title: EmoCare AI Backend
+emoji: 🧠
+colorFrom: teal
+colorTo: blue
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # emocare-ai
 
 EmoCare AI is a comprehensive platform for emotional wellness and therapy. 
