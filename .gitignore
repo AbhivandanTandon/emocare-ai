@@ -1,11 +1,11 @@
 # AI Models
-*.pt
-*.pth
-*.safetensors
-*.bin
+# *.pt
+# *.pth
+# *.safetensors
+# *.bin
 
 # Model folders
-backend/models/
+# backend/models/
 
 # Environment
 .env

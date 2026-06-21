@@ -92,6 +92,11 @@ def load_models():
     logger.info("Text model (RoBERTa) ready on %s", DEVICE)
 
     logger.info("Loading audio model from %s", audio_path)
+    if not Path(audio_path).exists():
+        logger.warning("Audio model checkpoint not found at %s — audio classification disabled", audio_path)
+        _audio_model = None
+        return
+
     bb = WavLMModel.from_pretrained("microsoft/wavlm-large")
     _audio_model = SERModel(bb, 1024).to(DEVICE)
     ckpt = torch.load(str(audio_path), map_location=DEVICE, weights_only=False)

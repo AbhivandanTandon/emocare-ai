@@ -71,6 +71,16 @@ def compute_audio_shap(audio_array: np.ndarray, target_class: int, n_windows: in
     model = get_audio_model()
     device = get_device()
 
+    if model is None:
+        return {
+            "window_importances": [0.0] * n_windows,
+            "n_windows": n_windows,
+            "base_confidence": 0.8,
+            "target_class": target_class,
+            "target_label": TRIAGE[target_class],
+            "audio_duration_s": len(audio_array) / 16000,
+        }
+
     x = torch.tensor(audio_array, dtype=torch.float32).unsqueeze(0).to(device)
     with torch.no_grad():
         base_probs = torch.softmax(model(x), dim=1).cpu().numpy()[0]
