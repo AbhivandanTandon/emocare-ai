@@ -1,12 +1,11 @@
 import logging
 import os
+import threading
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.db.engine import init_db
-from app.ml.model_loader import load_models
-from app.ml.rag import load_rag
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("emocare")
@@ -46,11 +45,23 @@ def create_app() -> FastAPI:
     async def startup():
         logger.info("Initializing database...")
         await init_db()
-        logger.info("Loading ML models...")
-        load_models()
-        logger.info("Loading RAG knowledge base...")
-        load_rag()
-        logger.info("EmoCare AI is ready.")
+        logger.info("Database ready. Loading ML models in background thread...")
+
+        # Load heavy ML models in a background thread so uvicorn starts
+        # responding immediately (avoids Hugging Face Spaces startup timeout)
+        def _load_models_bg():
+            try:
+                from app.ml.model_loader import load_models
+                from app.ml.rag import load_rag
+                load_models()
+                load_rag()
+                logger.info("EmoCare AI ML models fully loaded and ready.")
+            except Exception as e:
+                logger.error("Failed to load ML models: %s", e)
+
+        t = threading.Thread(target=_load_models_bg, daemon=True)
+        t.start()
+        logger.info("EmoCare AI startup complete — models loading in background.")
 
     @app.get("/api/health")
     async def health():
