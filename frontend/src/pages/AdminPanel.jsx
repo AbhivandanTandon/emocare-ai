@@ -37,7 +37,19 @@ export default function AdminPanel() {
 
   const connectWebSocket = () => {
     if (!token) return;
-    const ws = new WebSocket(`ws://localhost:8000/ws/${token}`);
+    // In production the backend is on a separate domain (Railway);
+    // derive the WS host from VITE_API_URL, falling back to same-host for local dev.
+    const apiUrl = import.meta.env.VITE_API_URL || '';
+    let wsUrl;
+    if (apiUrl) {
+      const backendOrigin = new URL(apiUrl).origin;
+      const wsProtocol = backendOrigin.startsWith('https') ? 'wss' : 'ws';
+      wsUrl = `${wsProtocol}://${new URL(backendOrigin).host}/ws/${token}`;
+    } else {
+      const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+      wsUrl = `${wsProtocol}://${window.location.host}/ws/${token}`;
+    }
+    const ws = new WebSocket(wsUrl);
     ws.onmessage = (e) => {
       const data = JSON.parse(e.data);
       if (data.type === 'crisis_alert') {
